@@ -5,7 +5,12 @@ package main
 */
 
 
-import "fmt"
+//import "fmt"
+
+import (
+    "fmt"
+)
+
 
 const CELLS = 100*1024*1024
 const GC_MARGIN = CELLS - 24
@@ -78,6 +83,15 @@ const (
         UNBOUND
 )
 
+var primStr = map[value] string {
+    DUP: "dup", DROP: "drop", SWAP: "swap", WHL: "whl",
+    ADD: "add", GT: "gt",
+}
+
+var str2prim = map[string] value {
+    "dup": DUP, "drop": DROP, "swap": SWAP, "whl": WHL,
+    "add": ADD, "gt": GT,
+}
 
 type Vm struct {
     bra  value
@@ -425,9 +439,9 @@ func main() {
 
     // char str[] = "whl [ gt 0 dup add 1 ] 1 -2";
     // While loop for benchmark
-    len := -10
-    len = -5e7   // 3 sec on MAc
-    len = -5e8   // 18 sec on MAc
+    len1 := -10
+    len1 = -5e7   // 3 sec on MAc
+    //len = -5e8   // 18 sec on MAc
     //len = -50000000
     q := vm.cons(GT,NIL)
     q = vm.cons(box_int(0),q)
@@ -437,17 +451,35 @@ func main() {
     vm.bra = vm.cons(WHL,vm.bra)
     vm.bra = vm.cons(q,vm.bra)
     vm.bra = vm.cons(box_int(1),vm.bra)
-    vm.bra = vm.cons(box_int(len),vm.bra)
+    vm.bra = vm.cons(box_int(len1),vm.bra)
     
+    //prog := "add 1 2"
+    //prog := "whl [gt 0 dup add 1] 1 -50000000"
+    //vm.bra = vm.makeBra(prog)
+    
+    vm.bra = vm.loadFile("test.clj")
+    vm.printList(vm.bra, true)
     
     vm.eval_bra()
     fmt.Println(vm.bra)
 
     //vm.gc()
 
-    l := Cell{box_int(1),box_cell(2)}
-    fmt.Println(l)
+
+
+    vm.printList(vm.bra, true)
+    vm.printKet(vm.ket)
+    //vm.printElem(vm.bra, true)
+
+
+    //prog := "2 3 [ 5 6 ] 4"
+    //prog := "2 3 [ 5 6 [] [1 1 2 1 1 ] ] 4"
+    //prog := "2  3"
+    //prog := "dup 2 add [foo bar whl 3] 4 5"
+    //bra := vm.makeBra(prog)
+    //fmt.Println()
+    //vm.printList(bra, true)
+    
 }
 
 
-// 2-15, 14-20, 59-60
