@@ -5,13 +5,10 @@ package main
 
 import (
     "fmt"
-   // "bufio"
-   "bytes"
-   "errors"
+    "bytes"
+    "errors"
     "io/ioutil"
-    //"os"
-   // "strings"
-   "strconv"
+    "strconv"
 )
 
 /* compared to Base64 we place the digits at the beginning 
@@ -45,7 +42,7 @@ func string2symbol(str string) value {
             if nok == 10 {break}
         }
    }
-   return box_symb(x)
+   return boxSymb(x)
 }
 
 func symbol2string(symb value) string {
@@ -64,7 +61,7 @@ func symbol2string(symb value) string {
    return ""
 }
 
-func (vm *Vm) printElem(q value, invert bool) {
+func (vm *Vm) printElem(q value) {
    switch {
    case isInt(q):
        fmt.Print(unbox(q))
@@ -77,174 +74,51 @@ func (vm *Vm) printElem(q value, invert bool) {
    case isSymb(q):
         fmt.Print(symbol2string(q))
    default:
-        vm.printList(q,invert)
+        vm.printList(q)
    }
 }
 
-func (vm *Vm) printList(l value, invert bool) {
-   if isNil(l) {
-       print("[]")
-   } else {
+func (vm *Vm) printInnerList(l value, invert bool) {
+   if isDef(l) {
       if invert {
-          //l=vm.reverseL(l)
+          l=vm.reverse(l)
       }
-      fmt.Print("[")
-      vm.printElem(vm.car(l),invert)
+      vm.printElem(vm.car(l))
       l = vm.cdr(l)
-      for isDef(l) {
-          fmt.Print(" ")
-          vm.printElem(vm.car(l), invert)
-          l = vm.cdr(l)
+      if (!isCons(l) && isDef(l)){   // dotted list
+            fmt.Print(" . ")
+            vm.printElem(l)
+       } else { 
+          for isDef(l) {
+             fmt.Print(" ")
+             vm.printElem(vm.car(l))
+             l = vm.cdr(l)
+          }
       }
-      fmt.Print("]")
   }
+}
+
+func (vm *Vm) printList(l value) {
+      fmt.Print("[")
+      vm.printInnerList(l,true)
+      fmt.Print("]")
 }
 
 func (vm *Vm) printKet(l value) {
-   if isNil(l) {
-       print("[ >")
-   } else {
       fmt.Print("[")
-      vm.printElem(vm.car(l),false)
-      l = vm.cdr(l)
-      for isDef(l) {
-          fmt.Print(" ")
-          vm.printElem(vm.car(l), false)
-          l = vm.cdr(l)
-      }
-      fmt.Print(">")
-  }
-  fmt.Println()
+      vm.printInnerList(l,false)
+      fmt.Println(">")
 }
 
-
-/*
-void printList(any l, int invert, Vm *e) 
-{
-    if isNil(l) 
-        printf("[]");
-    else {
-       if (invert) l=reverse(l, e);
-       printf("[");
-       printElem(car(l), invert, e);
-       cdr_(&l);
-       if (!isCons(l) && !isNil(l)){   // dotted list
-            printf(" . ");
-            printElem(l,invert,e);
-       } else while(!isNil(l)) {
-          printf(" ");
-          printElem(car(l), invert, e);
-          cdr_(&l);
-       }
-       printf("]");
-   }
-}
-*/
-
-func isSpace(c byte) bool {
-   return c == ' ' || c == '\t'
-}
-
-//func nextchar(io *bufio.Reader) (byte, error) {
-func nextchar(io *bytes.Reader) (byte, error) {
-   c := byte('0')
-
-   for {
-      c, err := io.ReadByte()
-      if err != nil { 
-          return 0,err
-      }
-      if c == ';' {  // single line comment
-         for {
-            c, err = io.ReadByte()
-            if err != nil { 
-              return 0, err
-            }
-            if c == '\n' {
-                break
-            }
-        }
-     }
-    if !isSpace(c){ 
-        break
-    }
-   }
-
-   return c,nil
-}
-
-//func read_token(r *bufio.Reader) byte {
-func read_token(r *bytes.Reader, buf *bytes.Buffer) byte {
-    token := byte(' ')
-    ndots := 0  // number of dots in token
-    for {
-      c, err := r.ReadByte()
-      if err != nil { 
-          break
-      }
-      if c == '.' {
-        ndots += 1
-    }
-      if ndots > 1 {// can have at most 1 dot in number
-         r.UnreadByte()
-         break
-      }
-      switch { 
-      case c == '\n' || isSpace(c):
-         break
-      case !('0'<=c && c<'9' || c=='+' || c=='-')  :
-         r.UnreadByte()
-         break
-      //case !(c=='.' || c == '*' || c == '/' || isletter(c)):
-      //   r.UnreadByte()
-      //   break
-       case c=='`' || c == '\'' || c == '\\' || c == ';':
-         r.UnreadByte()
-         break
-       default:
-        //push!(buf,c)
-        buf.WriteByte(c)
-        //token = token * c
-      }
-   }
-   return token
-}
-
-//func (vm *Vm) read_tokens(r *bufio.Reader) value {
-func (vm *Vm) read_tokens(r *bytes.Reader) value {
-    val := NIL
-    var buf bytes.Buffer
-    for {
-        c,err := nextchar(r)
-        if err != nil {
-            return val  // end of stream
-        }
-        switch c {
-        case ']':    // end of list
-           return val
-        case '[':    // begin of list
-           newval := vm.read_tokens(r)
-           val = vm.cons(newval, val)
-         //elseif c == '\''   // escape
-         //  val = cons!(ESC, val, vm)
-         //elseif c == '`'   // Asc (escape value)
-         //  val = cons!(ASC, val, vm)
-         //elseif c == '\\'   // Backslash = lambda
-         //  val = cons!(LAMBDA, val, vm)
-         default:               // read new atom
-           r.UnreadByte()
-           read_token(r, &buf)
-           //newval = atom(token)
-              newval := NIL
-           val = vm.cons(newval, val)
-         }
-    }
-    return NIL
+func (vm *Vm) printBra(l value) {
+      fmt.Print("<")
+      vm.printInnerList(l,true)
+      fmt.Println("]")
 }
 
 func parse(token []byte) (value, error) {
     if n, err := strconv.Atoi(string(token)); err == nil {
-      return box_int(n), nil
+      return boxInt(n), nil
     } 
     p,ok := str2prim[string(token)]
     if ok {
@@ -252,12 +126,12 @@ func parse(token []byte) (value, error) {
     } else {
        return string2symbol(string(token)), nil  // token is a symbol
     }
-   return NIL, errors.New("parse error, token not found")
+   return nill, errors.New("parse error, token not found")
 }
 
 func (vm *Vm) readFromTokens(tokens [][]byte, pos int) (value, int) {
-  s := NIL
-  s1 := NIL
+  s := nill
+  s1 := nill
   for pos < len(tokens){
     token := tokens[pos]
     pos++
@@ -297,7 +171,7 @@ func removeComments (str []byte ) []byte {
           j += 1
       }
     }
-    return newstr
+    return newstr[0:j]
 }
 
 func tokenize(str []byte) [][]byte {
@@ -308,9 +182,7 @@ func tokenize(str []byte) [][]byte {
    return bytes.Fields(str)
 }
 
-
 func (vm *Vm) makeBra(prog string) value {
-    //tokens := tokenize([]byte("[ " + prog))
     tokens := tokenize([]byte(prog))
     val,_ := vm.readFromTokens(tokens, 0)
     return val
@@ -325,3 +197,8 @@ func (vm *Vm) loadFile(fname string) value{
     val,_ := vm.readFromTokens(tokens, 0)
     return val
 }
+
+
+// so far, printList of dotted lists works only for
+// dotted pairs (because not clear how to define reverse..
+// --> maybe remove print of dotted pairs totally??

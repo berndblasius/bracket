@@ -5,16 +5,13 @@ package main
 */
 
 
-//import "fmt"
-
 import (
     "fmt"
 )
 
 
-const CELLS = 100*1024*1024
-const GC_MARGIN = CELLS - 24
-
+const cells = 100*1024*1024
+const gc_margin = cells - 24
 
 // Tagbits (from right  to left)
 // local pointer, global pointer, Int, Prim, Symbol, Float
@@ -29,90 +26,115 @@ const GC_MARGIN = CELLS - 24
 //    Bit 4 = 0 --> assignable symbol
 //    Bit 4 = 1 --> primitive
 
-
-const TAG_TYPE   = 15 // mask with bits 1111
-const TAG_LOCAL  = 0  // bits 0000    cell on local heap
-const TAG_GLOBAL = 8  // bits 1000    cell on global heap
-const TAG_PRIM   = 1  // bits 0001
-const TAG_SYMB   = 9  // bits 1001
-const TAG_INT    = 3  // bits 0011
-const TAG_FLOAT  = 11 // bits 1011
+const tagType   = 15 // mask with bits 1111
+const tagLocal  = 0  // bits 0000    cell on local heap
+const tagGlobal = 8  // bits 1000    cell on global heap
+const tagPrim   = 1  // bits 0001
+const tagSymb   = 9  // bits 1001
+const tagInt    = 3  // bits 0011
+const tagFloat  = 11 // bits 1011
 
 type value int
 
-func box_cell(x int) value {return value(x<<4) }   // since TAG_LOCAL=0
-func box_global(x int) value {return value(x<<4 | TAG_GLOBAL)}
-func box_prim(x int) value {return value(x<<4 | TAG_PRIM)}
-func box_symb(x int) value {return value(x<<4 | TAG_SYMB)}
-func box_int(x int)  value {return value(x<<4 | TAG_INT)}
-//func box_float(x Int) Int { Int(reinterpret(Int32,x)) << 32 | TAG_FLOAT}
+func boxCell(x int) value {return value(x<<4) }   // since taglocal=0
+func boxGlobal(x int) value {return value(x<<4 | tagGlobal)}
+func boxPrim(x int) value {return value(x<<4 | tagPrim)}
+func boxSymb(x int) value {return value(x<<4 | tagSymb)}
+func boxInt(x int)  value {return value(x<<4 | tagInt)}
+//func box_float(x Int) Int { Int(reinterpret(Int32,x)) << 32 | tagFloat
 
 func unbox(x value) int  {return int(x)>>4}   // remove all tags
 func ptr(x value) int    {return int(x)>>4}   // in contrast to C, here the pointer is
                    // just the heap index, that is, a number
 //func unbox_float(x value) float = reinterpret(Float32, Int32(x>>32))
 
-func isInt(x value)    bool {return (x & TAG_TYPE) == TAG_INT}
-func isFloat(x value)  bool {return (x & TAG_TYPE) == TAG_FLOAT}
-func isPrim(x value)   bool {return (x & TAG_TYPE) == TAG_PRIM}
-func isSymb(x value)   bool {return (x & TAG_TYPE) == TAG_SYMB}
-func isLocal(x value)  bool {return (x & TAG_TYPE) == TAG_LOCAL}
-func isGlobal(x value) bool {return (x & TAG_TYPE) == TAG_GLOBAL}
+func isInt(x value)    bool {return (x & tagType == tagInt)}
+func isFloat(x value)  bool {return (x & tagType == tagFloat)}
+func isPrim(x value)   bool {return (x & tagType == tagPrim)}
+func isSymb(x value)   bool {return (x & tagType == tagSymb)}
+func isLocal(x value)  bool {return (x & tagType == tagLocal)}
+func isGlobal(x value) bool {return (x & tagType == tagGlobal)}
 
 func isCons(x value) bool {return (x & 1) == 0}
+func isAtom(x value) bool {return !isCons(x)}
 func isNumb(x value) bool {return (x & 3) == 3}
 func isAbstractSymb(x value) bool {return (x & 3) == 1}
 
-func isNil(x value) bool {return x == NIL}
-func isDef(x value) bool {return x != NIL}
- 
+func isNil(x value) bool {return x == nill}
+func isDef(x value) bool {return x != nill}
 
-type Cell struct {
+func (vm *Vm) isCons2(x value) bool {
+    return isCons(x) && isCons(vm.cdr(x))
+}
+//isCons3(x,vm) = isCons(x) && isCons(cdr(x,vm)) && isCons(cddr(x,vm))
+
+
+type cell struct {
     car  value
     cdr  value
 }
 
-const (
-        NIL value = iota<<4 | TAG_PRIM
-        DUP
-        DROP
-        SWAP
-        WHL
-        ADD
-        GT
-        UNBOUND
+const (  // bracket primitives
+        nill value = iota<<4 | tagPrim
+        dup
+        drop
+        swap
+        whl
+        add
+        gt
+        unbound
 )
 
 var primStr = map[value] string {
-    DUP: "dup", DROP: "drop", SWAP: "swap", WHL: "whl",
-    ADD: "add", GT: "gt",
+    dup: "dup", drop: "drop", swap: "swap", whl: "whl",
+    add: "add", gt: "gt",
 }
 
 var str2prim = map[string] value {
-    "dup": DUP, "drop": DROP, "swap": SWAP, "whl": WHL,
-    "add": ADD, "gt": GT,
+    "dup": dup, "drop": drop, "swap": swap, "whl": whl,
+    "add": add, "gt": gt,
+}
+
+type stats struct { // some statistics about the running program
+    nInst   int   // number of Instructions
+    nRecur  int   // recursion depth
+    nSteps  int   // no of performed programming steps
+    extent  int   // exent of genome at birth (vm size)
 }
 
 type Vm struct {
-    bra  value
-    ket  value
-    root value
-    next int   // index to next entry on heap
-    heap []Cell
-    altheap []Cell
-    need_gc bool
+    bra  value    // program, future of computation
+    ket  value    // result, past of computation
+    aux  value    // auxilliary stack (helps with stack shuffling)
+    env  value    // environment
+    root value    // anchor to save stuff for gc
+    next int      // index to next entry on arena
+    arena []cell  // memory arena to hold the cells
+    brena []cell  // second arena, needed for copying gc
+    need_gc bool   // flag to indicate that heap space gets rare
+    stats stats   // some statistics about the running program
+    trace int   //trace mode e: 0=no trace, 1=trace non-verbose, 3=verbose
+
 }
 
 func (vm *Vm) reset() {
     vm.next = 0
-    //vm.heap = [cells]Cell
-    //var heap [cells]Cell
+    vm.stats = stats{0,0,0,0}
+    vm.bra = nill
+    vm.ket = nill
+    vm.aux = nill
+    vm.env = nill
+    vm.root = nill
+    vm.trace = 0
+    //vm.arena = [cells]cell
+    //var arena [cells]cell
 }
 
 func init_vm() Vm {
-    h := make([]Cell, CELLS)
-    ah := make([]Cell, CELLS)
-    vm := Vm{NIL,NIL,NIL,0,h,ah,false}
+    h := make([]cell, cells)
+    ah := make([]cell, cells)
+    stats := stats{0,0,0,0}
+    vm := Vm{nill,nill,nill,nill,nill,0,h,ah,false,stats,0}
     return vm 
 }
 
@@ -124,21 +146,21 @@ func (vm *Vm) relocate(c value) value {
        return c
    }
    indv := ptr(c)
-   ah := vm.altheap[indv]
-   if ah.car == UNBOUND {
+   ah := vm.brena[indv]
+   if ah.car == unbound {
        return ah.cdr
    }
    ind := vm.next
-   vm.heap[ind]   = vm.altheap[indv]
-   vm.altheap[indv] = Cell{UNBOUND, box_cell(ind)}
+   vm.arena[ind]   = vm.brena[indv]
+   vm.brena[indv] = cell{unbound, boxCell(ind)}
    vm.next += 1
-   return box_cell(ind)
+   return boxCell(ind)
 }
 
 func (vm *Vm) gc() {
    fmt.Println("starting gc ************************************************")
-   var c Cell
-   vm.altheap, vm.heap = vm.heap, vm.altheap
+   var c cell
+   vm.brena, vm.arena = vm.arena, vm.brena
    finger :=  0
    vm.next = 0
 
@@ -152,17 +174,17 @@ func (vm *Vm) gc() {
    //  vm.stack[i] = relocate!(vm.stack[i],vm)
    //end
 
-   // scan remaining objects in heap (including objects added by this loop)
+   // scan remaining objects in arena (including objects added by this loop)
    for finger < vm.next {
-      c = vm.heap[finger]
-      vm.heap[finger] = Cell{vm.relocate(c.car), vm.relocate(c.cdr)}
+      c = vm.arena[finger]
+      vm.arena[finger] = cell{vm.relocate(c.car), vm.relocate(c.cdr)}
       finger += 1
   }
 
    //println("GC: live objects found: ", vm.next-1)
 
-   if vm.next >= GC_MARGIN {
-       fmt.Println("Bracket GC, heap too small")
+   if vm.next >= gc_margin {
+       fmt.Println("Bracket GC, arena too small")
    }
    vm.need_gc = false
    fmt.Println("GC finished")
@@ -171,50 +193,40 @@ func (vm *Vm) gc() {
 // **********************
 
 
-func (vm *Vm) cons(pcar value, pcdr value) value {
+func (vm *Vm) cons(pcar, pcdr value) value {
    vm.next += 1
-   if vm.next > GC_MARGIN {
+   if vm.next > gc_margin {
      vm.need_gc = true
    }
-   vm.heap[vm.next] = Cell{pcar,pcdr}
-   return box_cell(vm.next)  // return a boxed index
+   vm.arena[vm.next] = cell{pcar,pcdr}
+   return boxCell(vm.next)  // return a boxed index
 }
 
-func (vm *Vm) cons_it(pcar value, pcdr *value) {
+func (vm *Vm) consVal(pcar value, pcdr *value) {
    *pcdr = vm.cons(pcar, *pcdr)
 }
-
-/*
-func (vm *Vm) pop_a(list value) (value, value) { //unsafe, we assume that list is a cons
-    c := vm.heap[list.(Ptr)]
-    return c.car, c.cdr
-}
-func (vm *Vm) pop2_a(list value) (value, value, value) { //unsafe, we assume that list is a cons
-   var p,p1,l value
-   p,l = vm.pop_a(list)
-   p1,l = vm.pop_a(l)
-   return p, p1, l
-}
-*/
 
 /* Pop first item in list 
    we need care to differentiate between empty list
    and list which has empty list as top element
 */
-func (vm *Vm) pop(list *value, p *value) bool {
+func (vm *Vm) pop(list, p *value) bool {
     //ptr, isCons := (*list).(Ptr)
     if isNil(*list) {
-       *p = NIL
+       *p = nill
        return false
     }
     if isCons(*list) {
-        ind := unbox(*list)
-        c := vm.heap[ind]
+        c := vm.arena[unbox(*list)]
         *p = c.car
         *list = c.cdr
-    } else {  // pop from atom returns the atom
-        *p = *list
-        *list = NIL
+    //} else {  // pop from atom returns the atom
+    //    *p = *list
+    //    *list = nill
+    } else {  // pop from atom returns the atom and false
+        //*p = *list
+        *p = nill
+        return false
     }
     return true
 }
@@ -225,15 +237,11 @@ func (vm *Vm) pop2(list, p1, p2 *value) bool {
 }
 
 func (vm *Vm) car (p value) value {
-    return vm.heap[p>>4].car
+    return vm.arena[p>>4].car
 }
 
-//func (vm *Vm) car_ptr (p Ptr) value {
-//    return vm.heap[p].car
-//}
-
 func (vm *Vm) cdr (p value) value {
-    return vm.heap[p>>4].cdr
+    return vm.arena[p>>4].cdr
 }
 
 // unsafe
@@ -248,43 +256,84 @@ func (vm *Vm) caar(p value) value {
 //}
 
 
+func (vm *Vm) reverse(list value) value {
+    var p value 
+    l := nill
+    if vm.pop(&list,&p) {
+       if isAtom(list) && isDef(list) { // dotted pair
+         return vm.cons(list,p)
+       } else {
+          vm.consVal(p,&l)
+       }
+    }
+    for vm.pop(&list,&p) {
+       vm.consVal(p,&l)
+    }
+    return l
+}
 
-//isCons2(x,vm) = isCons(x) && isCons(cdr(x,vm))
-//isCons3(x,vm) = isCons(x) && isCons(cdr(x,vm)) && isCons(cddr(x,vm))
+// [ 1 ptr] [2 nil]  --> [2 ptr] [1 nil]
+// [1 ptr] [2 3]
 
+func (vm *Vm) reverse1(list value) value {
+    var p value 
+    l := nill
+    for vm.pop(&list,&p) {
+       vm.consVal(p,&l)
+    }
+    return l
+}
 
-//func pop2(list,vm) {
-//   p,l = pop(list,vm)
-//   if isCons(l)
-//       p1,l = pop(l,vm)
-//       return p, p1, l
-//   end
-//   return p, l , NIL
-//}
+func (vm *Vm) length(list value) int {
+// just count the number of conses, ie dotted list has length 1
+   n := 0
+   for isDef(list) {
+       n += 1
+       list = vm.cdr(list)
+   }
+   return n
+}
 
-func (vm *Vm) f_dup() {
-   //if isCons(vm.ket)
-   //ket_ptr, ok := vm.ket.(Ptr)
-   //if ok {
-       vm.ket = vm.cons(vm.car(vm.ket), vm.ket)
-      // vm.ket = vm.cons(vm.car_ptr(ket_ptr), vm.ket)
-   //end
-    //}
-       // fmt.Println("dup")
-
+func (vm *Vm) isEqual(p1, p2 value) bool {
+   if isCons(p1) && isCons(p2) { 
+      return (vm.isEqual(vm.car(p1),vm.car(p2)) && 
+              vm.isEqual(vm.cdr(p1),vm.cdr(p2)))
+   } else { 
+       return (p1 == p2)
+   }
 }
 
 
-func (vm *Vm) f_plus() {
+func (vm *Vm) fDup() {
+   if isCons(vm.ket) {
+       vm.ket = vm.cons(vm.car(vm.ket), vm.ket)
+   }
+}
+
+func (vm *Vm) fDrop() {
+   if isCons(vm.ket) {
+       vm.ket = vm.cdr(vm.ket)
+   }
+}
+
+func (vm *Vm) fSwap() {
+   var a,b value 
+   if vm.pop2(&vm.ket, &a, &b) {
+       vm.ket = vm.cons(a,vm.ket)
+       vm.ket = vm.cons(b,vm.ket)
+   }
+}
+
+func (vm *Vm) fPlus() {
     var n1,n2 value
     if vm.pop2(&vm.ket, &n1, &n2) {
-      n3 := box_int(unbox(n1) + unbox(n2))
+      n3 := boxInt(unbox(n1) + unbox(n2))
       vm.ket = vm.cons(n3,vm.ket)
       //fmt.Println("add: ",n3)
   }
 }
 
-func gt(x,y int) int {
+func myGt(x,y int) int {
    if x>y {
        return 1
    } else  {
@@ -292,11 +341,11 @@ func gt(x,y int) int {
    }
 }
 
-func (vm *Vm) f_gt() {
+func (vm *Vm) fGt() {
     var n1,n2 value
     if vm.pop2(&vm.ket, &n1, &n2) {
       //n1,n2, vm.ket = vm.pop2(vm.ket)
-      n3 := box_int(gt(unbox(n1), unbox(n2)))
+      n3 := boxInt(myGt(unbox(n1), unbox(n2)))
       vm.ket = vm.cons(n3,vm.ket)
       //fmt.Println("lt: ",n3)
     }
@@ -365,14 +414,14 @@ func istrue(x value) bool {
     case isNumb(x):
           return unbox(x) != 0
     case isPrim(x):
-          return x != NIL
+          return x != nill
     default:
           return true
     }
 }
 
 
-func (vm *Vm) f_whl() {
+func (vm *Vm) fWhl() {
    fmt.Println("Start whl ")
    var q,b value
    if vm.pop2(&vm.ket,&q, &b) {
@@ -382,7 +431,7 @@ func (vm *Vm) f_whl() {
        vm.root = vm.cons(q,vm.root)
        for istrue(b) {
          vm.bra = vm.car(vm.root)
-         vm.eval_bra()
+         vm.evalBra()
          if !vm.pop(&vm.ket,&b){
              break
          }
@@ -393,7 +442,7 @@ func (vm *Vm) f_whl() {
    }
 }
 
-func (vm *Vm) eval_bra() {
+func (vm *Vm) evalBra() {
       //fmt.Println("Start eval ")
     var e value
     for {
@@ -402,14 +451,18 @@ func (vm *Vm) eval_bra() {
         //fmt.Println("e=",e)
        
         switch e { 
-        case DUP:
-            vm.f_dup()
-        case WHL:
-            vm.f_whl()
-        case ADD:
-            vm.f_plus()
-        case GT:
-            vm.f_gt()
+        case dup:
+            vm.fDup()
+        case drop:
+            vm.fDrop()
+        case swap:
+            vm.fSwap()
+        case whl:
+            vm.fWhl()
+        case add:
+            vm.fPlus()
+        case gt:
+            vm.fGt()
         default:
             vm.ket = vm.cons(e,vm.ket)
             //fmt.Println("default")
@@ -424,62 +477,48 @@ func (vm *Vm) eval_bra() {
 }
 
 func main() {
-	fmt.Printf("rock'n roll\n")     // c
-    //var e value
-    //var bra, e value 
-    //bra = vm.cons(DUP,NIL)
-    //e, bra = vm.pop(bra)
+    fmt.Printf("rock'n roll\n")   
     vm := init_vm()
-    //vm.bra = vm.cons(ADD,vm.bra)
-    //vm.bra = vm.cons(LT,vm.bra)
-    //vm.bra = vm.cons(DUP,vm.bra)
-    //vm.bra = vm.cons(I(30),vm.bra)
-    //vm.bra = vm.cons(I(40),vm.bra)
-    //vm.ket = vm.cons(I(1),vm.ket)
-
-    // char str[] = "whl [ gt 0 dup add 1 ] 1 -2";
-    // While loop for benchmark
-    len1 := -10
-    len1 = -5e7   // 3 sec on MAc
-    //len = -5e8   // 18 sec on MAc
-    //len = -50000000
-    q := vm.cons(GT,NIL)
-    q = vm.cons(box_int(0),q)
-    q = vm.cons(DUP,q)
-    q = vm.cons(ADD,q)
-    q = vm.cons(box_int(1),q)
-    vm.bra = vm.cons(WHL,vm.bra)
-    vm.bra = vm.cons(q,vm.bra)
-    vm.bra = vm.cons(box_int(1),vm.bra)
-    vm.bra = vm.cons(box_int(len1),vm.bra)
     
     //prog := "add 1 2"
-    //prog := "whl [gt 0 dup add 1] 1 -50000000"
-    //vm.bra = vm.makeBra(prog)
+    //prog := "whl [gt 0 dup add 1] 1 -50000000"  // 5e7, 3 sec on Mac
+    prog := "1 2 3 ; this is a comment 4"    
+    vm.bra = vm.makeBra(prog)
     
-    vm.bra = vm.loadFile("test.clj")
-    vm.printList(vm.bra, true)
+    //vm.bra = vm.loadFile("test.clj")
+   
+    vm.printBra(vm.bra)
+    //vm.printList(vm.bra) 
+    //vm.printList(vm.reverse(vm.bra))
     
-    vm.eval_bra()
+    vm.evalBra()
     fmt.Println(vm.bra)
 
     //vm.gc()
 
-
-
-    vm.printList(vm.bra, true)
+    vm.printList(vm.bra)
     vm.printKet(vm.ket)
     //vm.printElem(vm.bra, true)
 
-
-    //prog := "2 3 [ 5 6 ] 4"
-    //prog := "2 3 [ 5 6 [] [1 1 2 1 1 ] ] 4"
-    //prog := "2  3"
-    //prog := "dup 2 add [foo bar whl 3] 4 5"
-    //bra := vm.makeBra(prog)
-    //fmt.Println()
-    //vm.printList(bra, true)
     
+    fmt.Println("test dotted")
+    //ll := vm.cons(1,2)
+    //ll := vm.cons(dup,drop)
+    //ll := vm.cons(boxInt(10),boxInt(20))
+    ll := vm.cons(boxInt(10),nill)
+    ll = vm.cons(dup,ll)
+    ll = vm.makeBra("dup drop [1 2 3]")
+    ll = vm.cons(ll, swap)
+    ll = vm.cons(swap, boxInt(10))
+
+    vm.printList(ll); fmt.Println()
+
+    lll := vm.reverse(ll)
+
+    
+    
+    vm.printList(lll)
+    vm.printList(vm.reverse(ll))
 }
 
 
