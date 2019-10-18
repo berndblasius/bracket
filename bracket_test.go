@@ -9,7 +9,7 @@ import (
 func (vm *Vm) testCode(code, res string) int {
   vm.bra = vm.makeBra(code)
   vm.ket = nill
-  result := vm.reverse(vm.makeBra(res))
+  result,_ := vm.reverse(vm.makeBra(res))
   //printf("bra ");print_bra(vm->bra,vm); 
   vm.evalBra()
   if vm.isEqual(vm.ket, result) {
@@ -74,10 +74,18 @@ func TestBracket(t *testing.T) {
   ntests++; success += vm.testCode(
     "drop 2",
     "")
-      
+
   ntests++; success += vm.testCode(
     "swap 2 3",
     "3 2")
+      
+  ntests++; success += vm.testCode(
+    "add 2 3",
+    "5")
+      
+  ntests++; success += vm.testCode(
+    "+ 2 3",
+    "5")
       
 
   /* *********************************************** */

@@ -1,6 +1,5 @@
+// io functions for bracket 
 package main
-
-/* io functions for bracket */
 
 
 import (
@@ -78,22 +77,25 @@ func (vm *Vm) printElem(q value) {
    }
 }
 
-func (vm *Vm) printInnerList(l value, invert bool) {
-   if isDef(l) {
+func (vm *Vm) printInnerList(list value, invert bool) {
+   isDotted := false 
+   var p value
+   if isCons(list) {
       if invert {
-          l=vm.reverse(l)
+          list, isDotted = vm.reverse(list)
       }
-      vm.printElem(vm.car(l))
-      l = vm.cdr(l)
-      if (!isCons(l) && isDef(l)){   // dotted list
-            fmt.Print(" . ")
-            vm.printElem(l)
-       } else { 
-          for isDef(l) {
+      vm.pop(&list, &p)
+      vm.printElem(p)
+      if isDotted {   // dotted list that was reversee
+            fmt.Print(" .")
+      }
+      for vm.pop(&list,&p) {
              fmt.Print(" ")
-             vm.printElem(vm.car(l))
-             l = vm.cdr(l)
-          }
+             vm.printElem(p)
+      }
+      if isDef(list) {   // dotted list
+            fmt.Print(" . ")
+            vm.printElem(list)
       }
   }
 }
@@ -188,17 +190,10 @@ func (vm *Vm) makeBra(prog string) value {
     return val
 }
 
-
 func (vm *Vm) loadFile(fname string) value{
-    //file,_ := os.Open(prog)
-    //r := bufio.NewReader(file)
     b, _ := ioutil.ReadFile(fname)
     tokens := tokenize(b)
     val,_ := vm.readFromTokens(tokens, 0)
     return val
 }
 
-
-// so far, printList of dotted lists works only for
-// dotted pairs (because not clear how to define reverse..
-// --> maybe remove print of dotted pairs totally??
