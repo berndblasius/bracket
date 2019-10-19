@@ -4,12 +4,14 @@
 package main
 
 import (
+    "errors"
     "fmt"
 )
 
 
 const cells = 100*1024*1024
-const gc_margin = cells - 24
+const gcMargin  = cells - 24
+const stackSize = 1024*1024
 
 // Tagbits (from right  to left)
 // local pointer, global pointer, Int, Prim, Symbol, Float
@@ -79,20 +81,27 @@ const (  // bracket primitives
         dup
         drop
         swap
+        cons
+        eval
         whl
         add
         gt
+        eq
+        iff   // "iff" since "if" already taken by golang
+        esc
         unbound
 )
 
 var primStr = map[value] string {
-    dup: "dup", drop: "drop", swap: "swap", whl: "whl",
-    add: "add", gt: "gt",
+    cons:"cons", dup:"dup", drop:"drop", esc:"esc", eval:"eval", eq:"eq",
+    iff:"if", swap:"swap", whl:"whl",
+    add:"+", gt:">",
 }
 
 var str2prim = map[string] value {
-    "dup": dup, "drop": drop, "swap": swap, "whl": whl,
-    "add": add, "+": add, "gt": gt,
+    "cons":cons, "dup":dup, "drop":drop, "esc":esc, "eval":eval, "eq":eq, 
+    "if":iff, "swap":swap, "whl":whl,
+    "add":add, "+":add, "gt":gt, ">":gt,
 }
 
 type stats struct { // some statistics about the running program
@@ -111,7 +120,10 @@ type Vm struct {
     next int      // index to next entry on arena
     arena []cell  // memory arena to hold the cells
     brena []cell  // second arena, needed for copying gc
-    need_gc bool   // flag to indicate that heap space gets rare
+    stack []value  //
+    stackIndex int
+    needGc bool  // flag to indicate that heap space gets rare
+    depth int     // current recursion depth
     stats stats   // some statistics about the running program
     trace int   //trace mode e: 0=no trace, 1=trace non-verbose, 3=verbose
 
@@ -123,16 +135,20 @@ func (vm *Vm) reset() {
     vm.bra = nill
     vm.ket = nill
     vm.aux = nill
-    vm.env = nill
+    vm.env = vm.cons(nill,nill)
     vm.root = nill
+    vm.stackIndex = 0
+    vm.depth = 0
     vm.trace = 0
 }
 
 func init_vm() Vm {
     a := make([]cell, cells)
     b := make([]cell, cells)
+    stack := make([]value, stackSize)
     stats := stats{0,0,0,0}
-    vm := Vm{nill,nill,nill,nill,nill,0,a,b,false,stats,0}
+    vm := Vm{nill,nill,nill,nill,nill,0,a,b,stack,0,false,0,stats,0}
+    vm.env = vm.cons(nill,nill)
     return vm 
 }
 
@@ -181,27 +197,51 @@ func (vm *Vm) gc() {
 
    //println("GC: live objects found: ", vm.next-1)
 
-   if vm.next >= gc_margin {
+   if vm.next >= gcMargin {
        fmt.Println("Bracket GC, arena too small")
    }
-   vm.need_gc = false
+   vm.needGc = false
    fmt.Println("GC finished")
 }
 
 // **********************
 
+// stack functions
+func (vm *Vm) pushStack(x value) error {
+    if vm.stackIndex == stackSize {
+        return errors.New("Vm stack overflow")
+    }
+    vm.stack[vm.stackIndex] = x
+    vm.stackIndex++;
+    return nil
+}
+
+// we don't check for underflow because it should never occur
+func (vm *Vm) popStack() value {
+    //if vm.stackIndex == 0 {
+    //    return nill, errors.New("Vm stack underflow")
+    //}
+    vm.stackIndex--
+    x := vm.stack[vm.stackIndex]
+    return x
+}
+
+func (vm *Vm) getStack() value {
+    //if vm.stackIndex == 0 {
+    //    return nill, errors.New("Vm stack underflow")
+    //}
+    x := vm.stack[vm.stackIndex]
+    return x
+}
+
 
 func (vm *Vm) cons(pcar, pcdr value) value {
    vm.next += 1
-   if vm.next > gc_margin {
-     vm.need_gc = true
+   if vm.next > gcMargin {
+     vm.needGc = true
    }
    vm.arena[vm.next] = cell{pcar,pcdr}
    return boxCell(vm.next)  // return a boxed index
-}
-
-func (vm *Vm) consVal(pcar value, pcdr *value) {
-   *pcdr = vm.cons(pcar, *pcdr)
 }
 
 // pop top element from list
@@ -249,10 +289,10 @@ func (vm *Vm) reverse(list value) (value, bool) {
     var p value 
     l := nill
     for vm.pop(&list,&p) {
-       vm.consVal(p,&l)
+       l = vm.cons(p,l)
     }
     if isDef(list) {   // list contained a dotted pais
-        vm.consVal(list,&l)
+        l = vm.cons(list,l)
         return l, true
     } else {
         return l, false // list did not contain a dotted pair
@@ -278,7 +318,24 @@ func (vm *Vm) isEqual(p1, p2 value) bool {
    }
 }
 
+func (vm *Vm) newEnv(env value) value {
+    return vm.cons(nill,env)
+}
 
+func istrue(x value) bool {
+    switch {
+    case isNumb(x):
+          return unbox(x) != 0
+    case isPrim(x):
+          return x != nill
+    default:
+          return true
+    }
+}
+
+
+
+// *******************************************
 func (vm *Vm) fDup() {
    if isCons(vm.ket) {
        vm.ket = vm.cons(vm.car(vm.ket), vm.ket)
@@ -297,6 +354,13 @@ func (vm *Vm) fSwap() {
        vm.ket = vm.cons(a,vm.ket)
        vm.ket = vm.cons(b,vm.ket)
    }
+}
+
+func (vm *Vm) fCons() {
+    var p1,p2 value
+    if vm.pop2(&vm.ket, &p1, &p2) {
+      vm.ket = vm.cons(vm.cons(p1,p2),vm.ket)
+    }
 }
 
 func (vm *Vm) fPlus() {
@@ -326,14 +390,50 @@ func (vm *Vm) fGt() {
     }
 }
 
-func istrue(x value) bool {
-    switch {
-    case isNumb(x):
-          return unbox(x) != 0
-    case isPrim(x):
-          return x != nill
-    default:
-          return true
+func (vm *Vm) fEq() {
+   var p1, p2 value
+   if vm.pop2(&vm.ket, &p1, &p2) {
+       b := boxInt(0)
+       if vm.isEqual(p1,p2) {b = boxInt(1)}
+       vm.ket = vm.cons(b, vm.ket)
+   }
+}
+
+func (vm *Vm) fIf() {
+   var p, p1, p2 value
+   if vm.pop2(&vm.ket, &p1, &p2) && vm.pop(&vm.ket,&p) {
+       if istrue(p) {
+          vm.ket = vm.cons(p1, vm.ket)
+      } else {
+          vm.ket = vm.cons(p2, vm.ket)
+      }
+   }
+}
+
+
+func (vm *Vm) fEsc() {
+    var val value
+    if vm.pop(&vm.bra, &val) { 
+         vm.ket = vm.cons(val,vm.ket)
+    }
+
+}
+
+func (vm *Vm) fEval() {
+    var op value
+    if vm.pop(&vm.ket,&op){
+        switch {
+        case isCons(op):
+            vm.evalCons(op)
+        case isNil(op):
+            return
+        case isPrim(op):
+             vm.evalPrim(op)
+        case isSymb(op):
+             vm.evalSymb(op) 
+        default:   // eval a number
+             vm.evalNumb(op)
+        }
     }
 }
 
@@ -358,36 +458,87 @@ func (vm *Vm) fWhl() {
    }
 }
 
+func (vm *Vm) evalCons(op value) {
+    if isCons(vm.bra) {
+       vm.depth++
+       _ = vm.pushStack(vm.bra)
+       _ = vm.pushStack(vm.env)
+       vm.env = vm.newEnv(vm.env)
+    } else { // tail position
+    }
+    vm.bra = op
+}
+
+func (vm *Vm) evalNumb(n value) {
+    vm.ket = vm.cons(n,vm.ket)
+}
+
+
+func (vm *Vm) evalSymb(sym value) {
+    vm.ket = vm.cons(sym,vm.ket)
+}
+
+func (vm *Vm) evalPrim(p value) {
+    switch p { 
+    case dup:
+        vm.fDup()
+    case drop:
+        vm.fDrop()
+    case swap:
+        vm.fSwap()
+    case cons:
+        vm.fCons()
+    case eval:
+        vm.fEval()
+    case whl:
+        vm.fWhl()
+    case add:
+        vm.fPlus()
+    case gt:
+        vm.fGt()
+    case eq:
+        vm.fEq()
+    case iff:
+        vm.fIf()
+    case esc:
+        vm.fEsc()
+    default:
+        fmt.Println("Error: unknown primitive")
+        
+    }
+}
+
 func (vm *Vm) evalBra() {
       //fmt.Println("Start eval ")
+    startingDepth := vm.depth
+    //vm.pushStack(vm.bra)
     var e value
     for {
         vm.pop(&vm.bra,&e);
         //fmt.Println("e=",e)
        
-        switch e { 
-        case dup:
-            vm.fDup()
-        case drop:
-            vm.fDrop()
-        case swap:
-            vm.fSwap()
-        case whl:
-            vm.fWhl()
-        case add:
-            vm.fPlus()
-        case gt:
-            vm.fGt()
+        switch {
+        case isNil(e):
+           vm.ket = vm.cons(e,vm.ket)
+        case isPrim(e):
+           vm.evalPrim(e)
+        case isSymb(e):
+           vm.evalSymb(e)
         default:
-            vm.ket = vm.cons(e,vm.ket)
-            //fmt.Println("default")
-            
+           vm.ket = vm.cons(e,vm.ket)
         }
 
-        if vm.need_gc {
+        if vm.needGc {
             vm.gc()
         }
-        if isNil(vm.bra) {break}
+        if isNil(vm.bra) {    // exit scope
+            if vm.depth == startingDepth {
+              break
+            }
+            vm.depth--
+            vm.env = vm.popStack()
+            vm.bra = vm.popStack()
+        }
     }
 }
 

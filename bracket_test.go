@@ -5,94 +5,101 @@ import (
        "testing"
    )
 
-
-func (vm *Vm) testCode(code, res string) int {
-  vm.bra = vm.makeBra(code)
-  vm.ket = nill
-  result,_ := vm.reverse(vm.makeBra(res))
-  //printf("bra ");print_bra(vm->bra,vm); 
-  vm.evalBra()
-  if vm.isEqual(vm.ket, result) {
-    //fmt.Println("test no error")
-    //vm.printKet(vm.makeBra(code))
-    //vm.printKet(vm.ket)
-    //vm.printKet(result)
-      return 1
-  } else {
-    //t.Error() 
-    fmt.Println("test error")
-    vm.printKet(vm.makeBra(code))
-    vm.printKet(vm.ket)
-    vm.printKet(result)
-    return 0 
+// generate a closure to safe test statistics
+func (vm *Vm) makeTest() (f func(string, string)){
+  var ntests, success int
+  f = func(code, res string){
+      if code == "__show results__" {
+         fmt.Println("Number of tests ", ntests)
+         fmt.Println("Number of tests passed ", success)
+         fmt.Println("Number of tests failed ", ntests - success)
+      } else {
+          ntests++
+          vm.bra = vm.makeBra(code)
+          vm.ket = nill
+          result,_ := vm.reverse(vm.makeBra(res))
+          vm.evalBra()
+          if vm.isEqual(vm.ket, result) {
+            //fmt.Println("test no error")
+            //vm.printKet(vm.makeBra(code))
+            //vm.printKet(vm.ket)
+            //vm.printKet(result)
+              success++
+              return 
+          } else {
+            //t.Error() 
+            fmt.Println("test error")
+            vm.printKet(vm.makeBra(code))
+            vm.printKet(vm.ket)
+            vm.printKet(result)
+            return 
+          }
+     }
   }
+  return
 }
 
 func TestBracket(t *testing.T) {
   vm := init_vm()
-  var c, r string
-  ntests := 0
-  success := 0
+  //var c, r string
+  test := vm.makeTest() 
 
-  ntests++; success += vm.testCode(
-    "1 2 3",    
-    "1 2 3")
+  test("1 2 3",     "1 2 3")   // values on bra are shifted on ket
+  test("1 2 3; this is a comment",    "1 2 3")
+  test( "1 [ ]",    "1 [ ]")
+  test("[1 2 3]",   "[1 2 3]")
+  test("1 [a ; comment \n [" + "2 3 ]]",  "1 [a [2 3 ]]")
 
-  ntests++; success += vm.testCode(
-    "1 2 3 ; this is a comment",    
-    "1 2 3")
-
-  ntests++; success += vm.testCode(
-    "1 [ ]",    
-    "1 [ ]")
-
-  ntests++; success += vm.testCode(
-    "[1 2 3]",    
-    "[1 2 3]")
-
-
-  c =  "1 [a ; comment \n [" + "2 3 ]]"    
-  r =  "1 [a [2 3 ]]"    
-  ntests++; success += vm.testCode(c,r)
-
-  ntests++; success += vm.testCode(
-    "dup 2",
-    "2 2")
-      
-  ntests++; success += vm.testCode(
-    "dup 2 3",
-    "2 2 3")
-      
-  c = "dup [2 3] 10"
-  r = "[2 3] [2 3] 10"
-  ntests++; success += vm.testCode(c, r)
-
-  ntests++; success += vm.testCode(
-    "drop 2 3",
-    "3")
-      
-  ntests++; success += vm.testCode(
-    "drop 2",
-    "")
-
-  ntests++; success += vm.testCode(
-    "swap 2 3",
-    "3 2")
-      
-  ntests++; success += vm.testCode(
-    "add 2 3",
-    "5")
-      
-  ntests++; success += vm.testCode(
-    "+ 2 3",
-    "5")
+  // stack shuffling
+    test( "dup 2", "2 2")
+    test("dup 2 3", "2 2 3")
+    test("dup [2 3] 10", "[2 3] [2 3] 10")
+    test("drop 2 3", "3")
+    test("drop 2", "")
+    test("swap 2 3", "3 2")
+    test("x esc 4", "x 4")
+    test("x' 4", "x 4")
+    test("[1 2 3]'", "[1 2 3]")
+    test("cons 1 []", "[1]")
+    test("cons 4 [1 2 3]", "[1 2 3 4]")
+    test("cons [4 5] [1 2 3]", "[1 2 3 [4 5]]")
       
 
-  /* *********************************************** */
-  fmt.Println("Number of tests ", ntests)
-  fmt.Println("Number of tests passed ", success)
-  fmt.Println("Number of tests failed ", ntests - success)
-  
+  // eval  
+    test("eval [add 1] 2", "3")
+    test( "eval [add] 1 2", "3")
+    test( "eval [1 2 3] 4", "1 2 3 4")
+    test("eval [] 1", "1")
+      
+
+  // math  
+    test("add 2 3", "5")
+    test("+ 2 3", "5")
+    test("gt 10 4", "1")
+    test("> 10 4", "1")
+    test("> 10 10", "0")
+    test("> 4 10", "0")
+
+  // eq  
+    test( "eq 2 2", "1")
+    test("eq 2 3", "0")
+    test("eq [] []", "1")
+    test("eq [1 2 3] [1 2 3]", "1")
+    test("eq 2 []", "0")
+    test("eq 2 x'", "0")
+    test("eq x' x'", "1")
+    test("eq y' x'", "0")
+
+  // if  
+    test( "if 20 30 1", "20")
+    test("if 20 30 0", "30")
+    test("if 20 30 [7]", "20")
+    test( "if 20 30 []", "30")
+    test( "if 20 30 foo'", "20")
+    test( "if 20 30", "")
+    test("if 20", "")
 
 
+    test("__show results__", "")
 }
+
