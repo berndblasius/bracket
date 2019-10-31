@@ -15,6 +15,7 @@ func (vm *Vm) makeTest() (f func(string, string)){
          fmt.Println("Number of tests failed ", ntests - success)
       } else {
           ntests++
+          vm.reset()
           vm.bra = vm.makeBra(code)
           vm.ket = nill
           result,_ := vm.reverse(vm.makeBra(res))
@@ -57,20 +58,43 @@ func TestBracket(t *testing.T) {
     test("drop 2 3", "3")
     test("drop 2", "")
     test("swap 2 3", "3 2")
-    test("x esc 4", "x 4")
-    test("x' 4", "x 4")
-    test("[1 2 3]'", "[1 2 3]")
+
+    test("x esc 4",  "x 4")       // escape symbol
+    test("x' 4",     "x 4")
+    test("[1 2 3]'", "[1 2 3]")   // escape a list or symbol..
+    test("3'", "3")               // .. just move to ket
+
     test("cons 1 []", "[1]")
     test("cons 4 [1 2 3]", "[1 2 3 4]")
     test("cons [4 5] [1 2 3]", "[1 2 3 [4 5]]")
       
 
-  // eval  
-    test("eval [add 1] 2", "3")
-    test( "eval [add] 1 2", "3")
-    test( "eval [1 2 3] 4", "1 2 3 4")
-    test("eval [] 1", "1")
-      
+  // def, eval  
+    test("def x' 2 10", "10")    // x bound to 2, def consumes value on ket
+    test("x",           "[]")    // unbound variable evaluates to nill
+    test("x def x' 2",  "2")     
+    test("x y x def y' 3 def x' 2",  "2 3 2")     
+
+    test("val x' def x' 2",   "2")
+    test("x` def x' 2",       "2")  // escape value of symbol to ket
+    test("val [1 2]",         "[1 2]")
+    test("[1 2]`",            "[1 2]")
+    test("x` def x' [1 2 3]", "[1 2 3]")  
+
+
+    test("eval [x def x' 2]",  "2")     // inner scope
+    test("eval [x def x' 2] def x' 3",  "2")     // inner scope
+    test("x eval [x def x' 2] x def x' 3",  "3 2 3")     // inner scope
+
+    test("eval [add 1] 2",    "3")
+    test("eval [add] 1 2",    "3")
+    test("eval [1 2 3] 4",    "1 2 3 4")
+    test("eval [] 1",         "1")    // eval empty list
+    test("eval add' 1 2",     "3")    // eval symbol
+    test("eval foo' def foo' 5", "5")  
+    test("eval foo' def foo' bar'", "bar")  
+    //test("eval foo' 1 2 def foo' [add]", "3")  
+    //test("eval foo' 1 2 def foo' add'", "3")  
 
   // math  
     test("add 2 3", "5")

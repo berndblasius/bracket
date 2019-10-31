@@ -83,24 +83,29 @@ const (  // bracket primitives
         swap
         cons
         eval
+        def
         whl
         add
         gt
         eq
         iff   // "iff" since "if" already taken by golang
         esc
+        vesc
+        val
         unbound
 )
 
 var primStr = map[value] string {
-    cons:"cons", dup:"dup", drop:"drop", esc:"esc", eval:"eval", eq:"eq",
-    iff:"if", swap:"swap", whl:"whl",
+    cons:"cons", def:"def", dup:"dup", drop:"drop", 
+    esc:"esc", eval:"eval", eq:"eq",
+    iff:"if", swap:"swap", val:"val", vesc:"vesc", whl:"whl",
     add:"+", gt:">",
 }
 
 var str2prim = map[string] value {
-    "cons":cons, "dup":dup, "drop":drop, "esc":esc, "eval":eval, "eq":eq, 
-    "if":iff, "swap":swap, "whl":whl,
+    "cons":cons, "def":def, "dup":dup, "drop":drop, 
+    "esc":esc, "eval":eval, "eq":eq, 
+    "if":iff, "swap":swap, "val":val, "vesc":vesc, "whl":whl,
     "add":add, "+":add, "gt":gt, ">":gt,
 }
 
@@ -206,34 +211,6 @@ func (vm *Vm) gc() {
 
 // **********************
 
-// stack functions
-func (vm *Vm) pushStack(x value) error {
-    if vm.stackIndex == stackSize {
-        return errors.New("Vm stack overflow")
-    }
-    vm.stack[vm.stackIndex] = x
-    vm.stackIndex++;
-    return nil
-}
-
-// we don't check for underflow because it should never occur
-func (vm *Vm) popStack() value {
-    //if vm.stackIndex == 0 {
-    //    return nill, errors.New("Vm stack underflow")
-    //}
-    vm.stackIndex--
-    x := vm.stack[vm.stackIndex]
-    return x
-}
-
-func (vm *Vm) getStack() value {
-    //if vm.stackIndex == 0 {
-    //    return nill, errors.New("Vm stack underflow")
-    //}
-    x := vm.stack[vm.stackIndex]
-    return x
-}
-
 
 func (vm *Vm) cons(pcar, pcdr value) value {
    vm.next += 1
@@ -302,7 +279,7 @@ func (vm *Vm) reverse(list value) (value, bool) {
 // just count the number of conses, ie dotted pair has length 1
 func (vm *Vm) length(list value) int {
    n := 0
-   for isDef(list) {
+   for isCons(list) {
        n += 1
        list = vm.cdr(list)
    }
@@ -318,8 +295,140 @@ func (vm *Vm) isEqual(p1, p2 value) bool {
    }
 }
 
+
+// stack functions
+func (vm *Vm) pushStack(x value) error {
+    if vm.stackIndex == stackSize {
+        return errors.New("Vm stack overflow")
+    }
+    vm.stack[vm.stackIndex] = x
+    vm.stackIndex++;
+    return nil
+}
+
+// we don't check for underflow because it should never occur
+func (vm *Vm) popStack() value {
+    //if vm.stackIndex == 0 {
+    //    return nill, errors.New("Vm stack underflow")
+    //}
+    vm.stackIndex--
+    x := vm.stack[vm.stackIndex]
+    return x
+}
+
+func (vm *Vm) getStack() value {
+    //if vm.stackIndex == 0 {
+    //    return nill, errors.New("Vm stack underflow")
+    //}
+    x := vm.stack[vm.stackIndex]
+    return x
+}
+
 func (vm *Vm) newEnv(env value) value {
     return vm.cons(nill,env)
+}
+
+func (vm *Vm) findKey(key, env value) value {
+    bnds := vm.car(vm.env)  //current frame (list of bindings) is on top of env
+    for isCons(bnds) {
+       bnd := vm.car(bnds)
+       if vm.car(bnd) == key {
+           return bnd
+       } else {
+          bnds = vm.cdr(bnds) 
+       }
+    }
+    return nill
+}
+          
+func (vm *Vm) boundvalue(key value) value { // lookup symbol.. 
+    bnd := vm.binding(key, vm.env)
+    if bnd == nill {
+        return nill
+    } else {
+        return vm.cdr(bnd)
+    }
+}      
+
+
+func (vm *Vm) binding(key, env value) value {
+    bnd := vm.findKey(key, env)
+    for isNil(env) {
+       env = vm.cdr(env)
+       if isNil(env) {
+          return nill
+       }
+       bnd = vm.findKey(key, env)
+    }
+    return bnd
+}
+
+
+func (vm *Vm) bindKey(key,val value) {
+    var b,f,frame value
+    f = nill
+    vm.pop(&vm.env,&frame)   // pop frame from env
+    for vm.pop(&frame,&b) {  // search frame for key
+       if vm.car(b) == key {
+          break
+       } else {
+          f = vm.cons(b,f)   // store binding in aux frame f
+       }
+    }
+    for vm.pop(&f,&b) {    // put other bindings back in place
+       frame = vm.cons(b,frame)
+    }
+    b1 := vm.cons(key, val)  // and add new binding
+    frame = vm.cons(b1, frame)
+    vm.env = vm.cons(frame, vm.env)
+}
+
+func (vm *Vm) replaceKeyInFrame(key, val, frame value) (newFrame value) {
+    f := nill
+    var b value
+    for vm.pop(&frame,&b) {  // search for key
+       if vm.car(b) == key {
+          b1 := vm.cons(key, val)  // new binding
+          frame = vm.cons(b1, frame)
+          break
+       } else {
+          f = vm.cons(b,f)
+      }
+    }
+    if frame == nill {  // key not found
+        return nill
+    } 
+    for vm.pop(&f,&b) { // put other bindings back in place
+       frame = vm.cons(b,frame)
+    }
+    return frame
+}
+
+func (vm *Vm) replaceKey(key, val, env value) value {
+    e := nill  // empty envirohnment
+    var f value
+    envSave := env
+    for vm.pop(&env,&f) {  // search all frames in environment
+       f1 := vm.replaceKeyInFrame(key, val, f)
+       if isDef(f1) { // key found
+          env = vm.cons(f1, env) 
+          vm.printKet(env)
+          break
+       } else {
+          e = vm.cons(f,e)
+       }
+    } 
+    if isNil(env) { // key not found
+        b := vm.cons(key,val)
+        vm.pop(&envSave,&f)
+        f := vm.cons(b,f)
+        return vm.cons(f,env)
+    } 
+    
+    for vm.pop(&e,&f) {  // put other frames back in place
+      env = vm.cons(f, env)
+    }
+    return env
 }
 
 func istrue(x value) bool {
@@ -416,7 +525,26 @@ func (vm *Vm) fEsc() {
     if vm.pop(&vm.bra, &val) { 
          vm.ket = vm.cons(val,vm.ket)
     }
+}
 
+func (vm *Vm) fVesc() {
+    var val value
+    if vm.pop(&vm.bra, &val) { 
+         vm.ket = vm.cons(val,vm.ket)
+         vm.fVal()
+    }
+}
+
+func (vm *Vm) fVal() {
+    var key value
+    if vm.pop(&vm.ket, &key) { 
+        if isCons(key) {
+          vm.ket = vm.cons(key,vm.ket)
+        } else {
+          val := vm.boundvalue(key)       // lookup symbol.. 
+          vm.ket = vm.cons(val,vm.ket)    // .. and place on ket
+        }
+    }
 }
 
 func (vm *Vm) fEval() {
@@ -435,6 +563,17 @@ func (vm *Vm) fEval() {
              vm.evalNumb(op)
         }
     }
+}
+
+func (vm *Vm) fDef() {
+   var key, val value
+   if vm.pop2(&vm.ket, &key, &val) {
+       if !isCons(key) {
+         vm.bindKey(key,val)  // bind key to val in top env-frame
+       }
+       vm.printList(vm.env); fmt.Println()
+       vm.printList(vm.car(vm.env)); fmt.Println()
+   }
 }
 
 func (vm *Vm) fWhl() {
@@ -461,9 +600,12 @@ func (vm *Vm) fWhl() {
 func (vm *Vm) evalCons(op value) {
     if isCons(vm.bra) {
        vm.depth++
-       _ = vm.pushStack(vm.bra)
+       vm.printBra(vm.env)
        _ = vm.pushStack(vm.env)
+       _ = vm.pushStack(vm.bra)
        vm.env = vm.newEnv(vm.env)
+       fmt.Println("evalCons new env")
+       vm.printBra(vm.env)
     } else { // tail position
     }
     vm.bra = op
@@ -475,7 +617,16 @@ func (vm *Vm) evalNumb(n value) {
 
 
 func (vm *Vm) evalSymb(sym value) {
-    vm.ket = vm.cons(sym,vm.ket)
+    bnd := vm.binding(sym,vm.env)
+    if isNil(bnd) {
+       fmt.Println("isNil")
+       vm.ket = vm.cons(nill,vm.ket)
+    } else {
+       fmt.Println("is not Nil")
+       val := vm.cdr(bnd)
+       vm.ket = vm.cons(val,vm.ket)
+    }
+
 }
 
 func (vm *Vm) evalPrim(p value) {
@@ -490,6 +641,8 @@ func (vm *Vm) evalPrim(p value) {
         vm.fCons()
     case eval:
         vm.fEval()
+    case def:
+        vm.fDef()
     case whl:
         vm.fWhl()
     case add:
@@ -502,6 +655,10 @@ func (vm *Vm) evalPrim(p value) {
         vm.fIf()
     case esc:
         vm.fEsc()
+    case vesc:
+        vm.fVesc()
+    case val:
+        vm.fVal()
     default:
         fmt.Println("Error: unknown primitive")
         
@@ -514,6 +671,13 @@ func (vm *Vm) evalBra() {
     //vm.pushStack(vm.bra)
     var e value
     for {
+        
+        fmt.Println("trace")
+        vm.printBra(vm.bra)
+        vm.printKet(vm.ket)
+        vm.printBra(vm.env)
+        fmt.Println()
+        
         vm.pop(&vm.bra,&e);
         //fmt.Println("e=",e)
        
@@ -536,8 +700,8 @@ func (vm *Vm) evalBra() {
               break
             }
             vm.depth--
-            vm.env = vm.popStack()
             vm.bra = vm.popStack()
+            vm.env = vm.popStack()
         }
     }
 }
@@ -548,7 +712,9 @@ func main() {
     
     //prog := "add 1 2"
     //prog := "whl [gt 0 dup add 1] 1 -50000000"  // 5e7, 3 sec on Mac
-    prog := "1 2 3 ; this is a comment 4"    
+    //prog := "foo bar foo def foo' 2 def bar' 3"
+ 
+    prog := "eval foo' 1 2 def foo' [add]"   
     vm.bra = vm.makeBra(prog)
     
     //vm.bra = vm.loadFile("test.clj")
