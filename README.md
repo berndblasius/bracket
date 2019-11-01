@@ -8,7 +8,7 @@ Simple concatenative language geared towards genetic programming
 - inspired by concatenative languages, such as [Joy](http://www.kevinalbrecht.com/code/joy-mirror/joy.html), [Factor](http://factorcode.org), [Consize](https://github.com/denkspuren/consize),
 [Postscript](https://en.wikipedia.org/wiki/PostScript)
 - includes (dynamically) lexically scoped variables and a normal (prefix) Polish notation
-- here implemented in go (other implementation exist in Julia and C).
+- here implemented in go (other implementation exist in Julia and C)
 
 - still a work in progress...
 
@@ -40,7 +40,7 @@ with normal Poish notation and lexical scoping.
 #### Quotations, bras and kets
 Bracket is a stack-based language. Similar to Forth,
 data, functions, and code are hold in a stack (also called _quotation_ as in concatenative languages, and _list_ as in lisp).
-A quotation can hold numbers, symbols (any text items), and other quotations. For example `[1 2 dup [2 +]]`.
+A quotation can hold numbers, symbols, and other quotations. For example `[1 2 dup [2 +]]`.
 
 In Bracket two stacks play a special role:
  - the _bra_, which holds the program code
@@ -76,43 +76,51 @@ the order of elements visually does not change
   - `<1 2 | >  `  first evaluates to `<1| 2>`
  and then to `<| 1 2>`
   - `<1 2 3 ; this is a comment | >  `  evaluates to `|1 2 3>`
-  - `<1 [2 3]  | >  `  evaluates to `|1 [2 3]>`
+  - `<1 [2 3]| `  evaluates to `|1 [2 3]>`
 
 - esc:
-  Symbols can be escaped from bra to the ket without evaluation with the escape operator `esc` or the short notation `'` 
-  - `<foo esc| >  `  evaluates to `|foo>`
-  - `<foo'| >  `  evaluates to `|foo>`
-
+  Symbols can be escaped from bra to the ket without evaluation with the escape operator `esc` or the short notation `'` 
+  - `<foo esc|`  evaluates to `|foo>`
+  - `<foo'|`  evaluates to `|foo>`
 
 - Stack shuffling operators
-  - `<dup | 1 2>`   evaluates to `|1 1 2>`
-  - `<swap | 1 2>`  evaluates to `|2 1>`
-  - `<drop | 2 1>`  evaluates to `|1>`
+  - `<dup 1 2|`   evaluates to `|1 1 2>`
+  - `<swap 1 2|`  evaluates to `|2 1>`
+  - `<drop 1 2|`  evaluates to `|2>`
+
+- Stack operators
+  - `<car  [1 2 3]|`   evaluates to `|3 [1 2]>`
+  - `<cdr [1 2 3]|`   evaluates to `|[1 2]>`
+  - `<cons 3 [1 2]|`   evaluates to `|[1 2 3]>`
+  - `<cons car [1 2 3]|`   evaluates to `|[1 2 3]>`
 
 - Math operators
-  - `<+ | 3 2>`  evaluates to `|5>`
-  - `<- | 3 2>`  evaluates to `|1>`
-  - `<* | 3 2>`  evaluates to `|6>`
-
-- Logical values (0 and empty list [] code for logical false, everything else is logical true)  
-  - `<gt | 3 2>`  evaluates to `|1>`  ; greater than
-  - `<gt | 2 3>`  evaluates to `|0>`  ; 
-  - `<eq | 3 2>`  evaluates to `|0>`  ; equality
-  - `<eq | 3 3>`  evaluates to `|1>`  
-  - `<eq | foo foo>` evaluates to `|1>`  
-  - `<eq | [1 x] [1 x]>` evaluates to `|1>`  
+  - `<+ 3 2|`  evaluates to `|5>`
+  - `<- 3 2|`  evaluates to `|1>`
+  - `<* 3 2|`  evaluates to `|6>`
 
 - `def` defines a new variable in current scope
 
-  - `<def x'| 3>`  evaluates to `|>` ; x is bound to 3  
-  - `<x x def x' 3 |>`  evaluates to `|3 3>`  
-  - `<+ x def x' 2 3| >`  evaluates to `|5>`  
-  - `<x [x def x' 5 ] x def x' 3 |>`  evaluates to `|3 5 3>`  
+  - `<def x' 3|`  evaluates to `|>` ; note that x needs to be escaped and is bound to 3  
+  - `<x x def x' 3|`  evaluates to `|3 3>`  
+  - `<+ x def x' 2 3| `  evaluates to `|5>`  
+  - `<x [x def x' 5 ] x def x' 3|`  evaluates to `|3 5 3>`  
 
 
 - `eval` stores the current brack, takes a stack from the ket, which is evaluated in a new environment, and finally restores the old bra
-  - `<eval [+ 1] 3 | >`  evaluates to `|4>` 
+  - `<eval [+ 1] 3|`  evaluates to `|4>` 
 
+- Logical values (0 and empty list [] code for logical false, everything else is logical true)  
+  - `<gt 3 2|`  evaluates to `|1>`  ; greater than
+  - `<gt 2 3|`  evaluates to `|0>`  ; 
+  - `<eq 3 2|`  evaluates to `|0>`  ; equality
+  - `<eq 3 3|`  evaluates to `|1>`  
+  - `<eq foo foo|` evaluates to `|1>`  
+  - `<eq [1 x] [1 x]|` evaluates to `|1>`  
+
+- `if` takes three elements from ket, if third element is true store first on ket, else store second on ket
+  - `<if foo' bar' 1|`  evaluates to `|foo>` 
+  - `<if foo' bar' 0|`  evaluates to `|bar>` 
 
 ### Built in primitives
 - stack shuffling operator: `swap` `dup` `drop`

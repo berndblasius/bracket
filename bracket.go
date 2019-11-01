@@ -82,6 +82,8 @@ const (  // bracket primitives
         drop
         swap
         cons
+        car
+        cdr
         eval
         def
         whl
@@ -96,14 +98,14 @@ const (  // bracket primitives
 )
 
 var primStr = map[value] string {
-    cons:"cons", def:"def", dup:"dup", drop:"drop", 
+    cons:"cons", car:"car", cdr:"cdr", def:"def", dup:"dup", drop:"drop", 
     esc:"esc", eval:"eval", eq:"eq",
     iff:"if", swap:"swap", val:"val", vesc:"vesc", whl:"whl",
     add:"+", gt:">",
 }
 
 var str2prim = map[string] value {
-    "cons":cons, "def":def, "dup":dup, "drop":drop, 
+    "cons":cons, "car":car, "cdr":cdr, "def":def, "dup":dup, "drop":drop, 
     "esc":esc, "eval":eval, "eq":eq, 
     "if":iff, "swap":swap, "val":val, "vesc":vesc, "whl":whl,
     "add":add, "+":add, "gt":gt, ">":gt,
@@ -472,6 +474,37 @@ func (vm *Vm) fCons() {
     }
 }
 
+func (vm *Vm) fCar() {
+    var head, p value
+    if vm.pop(&vm.ket, &p) {
+        if vm.pop(&p, &head) { // car a list
+            vm.ket = vm.cons(p,vm.ket) // leave the rest of the list on the ket 
+            vm.ket = vm.cons(head,vm.ket)
+        } else {    // car a symbol
+          val := vm.boundvalue(p)   // lookup symbol.. 
+          if isCons(val) {
+              vm.ket = vm.cons(vm.car(val),vm.ket)
+          }
+        }
+    }
+}
+
+func (vm *Vm) fCdr() {
+    var head,p value
+    if vm.pop(&vm.ket, &p) {
+        if vm.pop(&p, &head) { // cdr a list
+            vm.ket = vm.cons(p,vm.ket) 
+        } else {
+          val := vm.boundvalue(p)   // lookup symbol.. 
+          if isCons(val) {
+              vm.ket = vm.cons(vm.cdr(val),vm.ket)
+          } else {
+              vm.ket = vm.cons(nill,vm.ket)  // at least leave a nill on ket
+          }
+        }
+    }
+}
+
 func (vm *Vm) fPlus() {
     var n1,n2 value
     if vm.pop2(&vm.ket, &n1, &n2) {
@@ -639,6 +672,10 @@ func (vm *Vm) evalPrim(p value) {
         vm.fSwap()
     case cons:
         vm.fCons()
+    case car:
+        vm.fCar()
+    case cdr:
+        vm.fCdr()
     case eval:
         vm.fEval()
     case def:
