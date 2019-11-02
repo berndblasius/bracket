@@ -4,7 +4,7 @@
 package main
 
 import (
-    "errors"
+    //"errors"
     "fmt"
 )
 
@@ -85,6 +85,7 @@ const (  // bracket primitives
         car
         cdr
         eval
+        rec
         def
         whl
         add
@@ -94,21 +95,22 @@ const (  // bracket primitives
         esc
         vesc
         val
+        trace
         unbound
 )
 
 var primStr = map[value] string {
     cons:"cons", car:"car", cdr:"cdr", def:"def", dup:"dup", drop:"drop", 
-    esc:"esc", eval:"eval", eq:"eq",
-    iff:"if", swap:"swap", val:"val", vesc:"vesc", whl:"whl",
-    add:"+", gt:">",
+    esc:"esc", eval:"eval", eq:"eq", iff:"if", 
+    rec:"rec", swap:"swap", val:"val", vesc:"vesc", whl:"whl",
+    add:"+", gt:">", trace:"trace",
 }
 
 var str2prim = map[string] value {
     "cons":cons, "car":car, "cdr":cdr, "def":def, "dup":dup, "drop":drop, 
-    "esc":esc, "eval":eval, "eq":eq, 
-    "if":iff, "swap":swap, "val":val, "vesc":vesc, "whl":whl,
-    "add":add, "+":add, "gt":gt, ">":gt,
+    "esc":esc, "eval":eval, "eq":eq, "if":iff, 
+    "rec":rec, "swap":swap, "val":val, "vesc":vesc, "whl":whl,
+    "add":add, "+":add, "gt":gt, ">":gt,"trace":trace,
 }
 
 type stats struct { // some statistics about the running program
@@ -190,10 +192,10 @@ func (vm *Vm) gc() {
    vm.ket = vm.relocate(vm.ket)
    vm.root = vm.relocate(vm.root)
    //vm.aux = vm.relocate(vm.aux)
-   //vm.env = vm.relocate(vm.env)
-   //for i = 1: vm.stackindex
-   //  vm.stack[i] = relocate!(vm.stack[i],Vjjjjjjjvm)
-   //end
+   vm.env = vm.relocate(vm.env)
+   for i:=0; i<=vm.stackIndex; i++ { 
+     vm.stack[i] = vm.relocate(vm.stack[i])
+   }
 
    // scan remaining objects in arena (including objects added by this loop)
    for finger < vm.next {
@@ -299,13 +301,12 @@ func (vm *Vm) isEqual(p1, p2 value) bool {
 
 
 // stack functions
-func (vm *Vm) pushStack(x value) error {
+func (vm *Vm) pushStack(x value) {
     if vm.stackIndex == stackSize {
-        return errors.New("Vm stack overflow")
+        panic("Vm stack overflow")
     }
     vm.stack[vm.stackIndex] = x
     vm.stackIndex++;
-    return nil
 }
 
 // we don't check for underflow because it should never occur
@@ -324,6 +325,10 @@ func (vm *Vm) getStack() value {
     //}
     x := vm.stack[vm.stackIndex]
     return x
+}
+
+func (vm *Vm) replaceStack(x value) {
+    vm.stack[vm.stackIndex] = x
 }
 
 func (vm *Vm) newEnv(env value) value {
@@ -580,6 +585,13 @@ func (vm *Vm) fVal() {
     }
 }
 
+func (vm *Vm) fTrace() { // change trace mode
+    var p value
+    if vm.pop(&vm.ket,&p) {
+        vm.trace = unbox(p)
+    }
+}
+
 func (vm *Vm) fEval() {
     var op value
     if vm.pop(&vm.ket,&op){
@@ -598,14 +610,24 @@ func (vm *Vm) fEval() {
     }
 }
 
+func (vm *Vm) fRec() {
+//anonymous recursion: replace bra of this scope by original value
+    var b value
+    if vm.pop(&vm.ket,&b) { // pop a boolean value
+        if istrue(b) {
+            vm.bra = vm.getStack()
+        }
+    }
+}
+
 func (vm *Vm) fDef() {
    var key, val value
    if vm.pop2(&vm.ket, &key, &val) {
        if !isCons(key) {
          vm.bindKey(key,val)  // bind key to val in top env-frame
        }
-       vm.printList(vm.env); fmt.Println()
-       vm.printList(vm.car(vm.env)); fmt.Println()
+       //vm.printList(vm.env); fmt.Println()
+       //vm.printList(vm.car(vm.env)); fmt.Println()
    }
 }
 
@@ -633,13 +655,12 @@ func (vm *Vm) fWhl() {
 func (vm *Vm) evalCons(op value) {
     if isCons(vm.bra) {
        vm.depth++
-       vm.printBra(vm.env)
-       _ = vm.pushStack(vm.env)
-       _ = vm.pushStack(vm.bra)
+       vm.pushStack(vm.env)
+       vm.pushStack(vm.bra)
+       vm.pushStack(op)
        vm.env = vm.newEnv(vm.env)
-       fmt.Println("evalCons new env")
-       vm.printBra(vm.env)
     } else { // tail position
+       vm.replaceStack(op)
     }
     vm.bra = op
 }
@@ -652,12 +673,14 @@ func (vm *Vm) evalNumb(n value) {
 func (vm *Vm) evalSymb(sym value) {
     bnd := vm.binding(sym,vm.env)
     if isNil(bnd) {
-       fmt.Println("isNil")
        vm.ket = vm.cons(nill,vm.ket)
     } else {
-       fmt.Println("is not Nil")
        val := vm.cdr(bnd)
-       vm.ket = vm.cons(val,vm.ket)
+       if isCons(val) {
+          vm.evalCons(val)
+       } else {
+          vm.ket = vm.cons(val,vm.ket)
+       }
     }
 
 }
@@ -678,6 +701,8 @@ func (vm *Vm) evalPrim(p value) {
         vm.fCdr()
     case eval:
         vm.fEval()
+    case rec:
+        vm.fRec()
     case def:
         vm.fDef()
     case whl:
@@ -696,6 +721,8 @@ func (vm *Vm) evalPrim(p value) {
         vm.fVesc()
     case val:
         vm.fVal()
+    case trace:
+        vm.fTrace()
     default:
         fmt.Println("Error: unknown primitive")
         
@@ -705,16 +732,16 @@ func (vm *Vm) evalPrim(p value) {
 func (vm *Vm) evalBra() {
       //fmt.Println("Start eval ")
     startingDepth := vm.depth
-    //vm.pushStack(vm.bra)
+    vm.pushStack(vm.bra)
     var e value
     for {
-        
-        fmt.Println("trace")
-        vm.printBra(vm.bra)
-        vm.printKet(vm.ket)
-        vm.printBra(vm.env)
-        fmt.Println()
-        
+        if vm.trace > 0 { 
+            //fmt.Println("trace")
+            //vm.printBra(vm.bra)
+            vm.printKet(vm.ket)
+            //vm.printBra(vm.env)
+            fmt.Println()
+        }
         vm.pop(&vm.bra,&e);
         //fmt.Println("e=",e)
        
@@ -737,10 +764,12 @@ func (vm *Vm) evalBra() {
               break
             }
             vm.depth--
+            _ = vm.popStack()  // for rec
             vm.bra = vm.popStack()
             vm.env = vm.popStack()
         }
     }
+    vm.bra = vm.popStack()
 }
 
 func main() {
@@ -751,7 +780,14 @@ func main() {
     //prog := "whl [gt 0 dup add 1] 1 -50000000"  // 5e7, 3 sec on Mac
     //prog := "foo bar foo def foo' 2 def bar' 3"
  
-    prog := "eval foo' 1 2 def foo' [add]"   
+    //prog := "eval foo' 1 2 def foo' [add] trace 1"   
+    
+    //prog := "eval [ rec gt 0 dup add 1 ] -5 trace 1"
+    //prog := "eval [ rec gt 0 dup add 1 ] -50 trace 0"
+    //prog := "eval [ rec gt 0 dup add 1 ] -50 trace 1"
+    //prog := "eval [ rec gt 0 dup add 1 ] -50000000"   // 5e7, 3.9 sec on MAc
+    prog := "eval [ rec gt 0 dup add 1 ] -500000000"   // 5e8, 1.7 sec on MAc
+
     vm.bra = vm.makeBra(prog)
     
     //vm.bra = vm.loadFile("test.clj")

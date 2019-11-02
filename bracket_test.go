@@ -114,6 +114,8 @@ func TestBracket(t *testing.T) {
   //test("eval foo' 1 2 def foo' [add]", "3")  
   //test("eval foo' 1 2 def foo' add'", "3")  
 
+  test("foo def foo' [add 1] 2", "3")
+
   // math  
   test("add 2 3", "5")
   test("+ 2 3", "5")
@@ -142,6 +144,8 @@ func TestBracket(t *testing.T) {
   test("if 20", "")
   test("if foo' bar' 1", "foo")
 
+  // recur
+  test("eval [ rec gt 0 dup add 1 ] -5", "0")   //loop
 
   test("__show results__", "")
 }

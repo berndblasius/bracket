@@ -19,7 +19,7 @@ The underlying assumption being that a functional language allows for terse,
 very compact programs. A concatenative language ensures a minimal syntax, which
 facilitates mutations of programs and helps to ensure that every syntacically correct code yields a running program. Thus, Bracket combines the expressive power of a
 Lisp with the minimai syntax of Forth. 
-Bracket includes lexically scoped enviroments and closures, but function arguments are passed on the global stack (the ket).
+Bracket includes tail recursion, lexically scoped enviroments and closures, but function arguments are passed on the global stack (the ket).
 
 To make the similarity to lisp-languages
 even more transparent, Bracket uses a normal Polish notation (rather than reversed
@@ -105,7 +105,7 @@ the order of elements visually does not change
   - `<x x def x' 3|`  evaluates to `|3 3>`  
   - `<+ x def x' 2 3| `  evaluates to `|5>`  
   - `<x [x def x' 5 ] x def x' 3|`  evaluates to `|3 5 3>`  
-
+  - `<foo def foo' [add 1] 2|` evaluates to `|3>`
 
 - `eval` stores the current brack, takes a stack from the ket, which is evaluated in a new environment, and finally restores the old bra
   - `<eval [+ 1] 3|`  evaluates to `|4>` 
@@ -121,6 +121,9 @@ the order of elements visually does not change
 - `if` takes three elements from ket, if third element is true store first on ket, else store second on ket
   - `<if foo' bar' 1|`  evaluates to `|foo>` 
   - `<if foo' bar' 0|`  evaluates to `|bar>` 
+
+- `rec` anonymous recursion
+  - `eval [rec gt 0 dup add 1]` evaluates to `|0>` (simple loop) 
 
 ### Built in primitives
 - stack shuffling operator: `swap` `dup` `drop`
