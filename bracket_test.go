@@ -119,6 +119,9 @@ func TestBracket(t *testing.T) {
   // math  
   test("add 2 3", "5")
   test("+ 2 3", "5")
+  test("- 3 2", "1")
+  test("* 3 2", "6")
+  test("/ 8 2", "4")
   test("gt 10 4", "1")
   test("> 10 4", "1")
   test("> 10 10", "0")

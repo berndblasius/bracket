@@ -89,7 +89,11 @@ const (  // bracket primitives
         def
         whl
         add
+        sub
+        mul
+        div
         gt
+        lt
         eq
         iff   // "iff" since "if" already taken by golang
         esc
@@ -103,14 +107,15 @@ var primStr = map[value] string {
     cons:"cons", car:"car", cdr:"cdr", def:"def", dup:"dup", drop:"drop", 
     esc:"esc", eval:"eval", eq:"eq", iff:"if", 
     rec:"rec", swap:"swap", val:"val", vesc:"vesc", whl:"whl",
-    add:"+", gt:">", trace:"trace",
+    add:"+", sub:"-", mul:"*", div:"/", gt:">", lt:"<",trace:"trace",
 }
 
 var str2prim = map[string] value {
     "cons":cons, "car":car, "cdr":cdr, "def":def, "dup":dup, "drop":drop, 
     "esc":esc, "eval":eval, "eq":eq, "if":iff, 
     "rec":rec, "swap":swap, "val":val, "vesc":vesc, "whl":whl,
-    "add":add, "+":add, "gt":gt, ">":gt,"trace":trace,
+    "add":add, "+":add, "sub":sub, "-":sub, "*":mul, "mul":mul, "/":div, "div":div,
+    "gt":gt, ">":gt, "lt":lt, "<":lt, "trace":trace,
 }
 
 type stats struct { // some statistics about the running program
@@ -510,14 +515,11 @@ func (vm *Vm) fCdr() {
     }
 }
 
-func (vm *Vm) fPlus() {
-    var n1,n2 value
-    if vm.pop2(&vm.ket, &n1, &n2) {
-      n3 := boxInt(unbox(n1) + unbox(n2))
-      vm.ket = vm.cons(n3,vm.ket)
-      //fmt.Println("add: ",n3)
-  }
-}
+type mathIntFunc func(int, int) int
+func myAdd(x,y int) int {return x+y}
+func mySub(x,y int) int {return x-y}
+func myMul(x,y int) int {return x*y}
+func myDiv(x,y int) int {return x/y}
 
 func myGt(x,y int) int {
    if x>y {
@@ -526,15 +528,21 @@ func myGt(x,y int) int {
        return 0
    }
 }
+func myLt(x,y int) int {
+   if y>x {
+       return 1
+   } else  {
+       return 0
+   }
+}
 
-func (vm *Vm) fGt() {
+func (vm *Vm) fMath(op mathIntFunc) {
     var n1,n2 value
     if vm.pop2(&vm.ket, &n1, &n2) {
-      //n1,n2, vm.ket = vm.pop2(vm.ket)
-      n3 := boxInt(myGt(unbox(n1), unbox(n2)))
+      n3 := boxInt(op(unbox(n1), unbox(n2)))
       vm.ket = vm.cons(n3,vm.ket)
-      //fmt.Println("lt: ",n3)
-    }
+      //fmt.Println("add: ",n3)
+  }
 }
 
 func (vm *Vm) fEq() {
@@ -708,9 +716,17 @@ func (vm *Vm) evalPrim(p value) {
     case whl:
         vm.fWhl()
     case add:
-        vm.fPlus()
+        vm.fMath(myAdd)
+    case sub:
+        vm.fMath(mySub)
+    case mul:
+        vm.fMath(myMul)
+    case div:
+        vm.fMath(myDiv)
     case gt:
-        vm.fGt()
+        vm.fMath(myGt)
+    case lt:
+        vm.fMath(myLt)
     case eq:
         vm.fEq()
     case iff:
@@ -783,10 +799,9 @@ func main() {
     //prog := "eval foo' 1 2 def foo' [add] trace 1"   
     
     //prog := "eval [ rec gt 0 dup add 1 ] -5 trace 1"
-    //prog := "eval [ rec gt 0 dup add 1 ] -50 trace 0"
-    //prog := "eval [ rec gt 0 dup add 1 ] -50 trace 1"
+    prog := "eval [rec gt 0 dup add 1 dup] -5 trace 0"
     //prog := "eval [ rec gt 0 dup add 1 ] -50000000"   // 5e7, 3.9 sec on MAc
-    prog := "eval [ rec gt 0 dup add 1 ] -500000000"   // 5e8, 1.7 sec on MAc
+    //prog := "eval [ rec gt 0 dup add 1 ] -500000000"   // 5e8, 24.9 sec on MAc
 
     vm.bra = vm.makeBra(prog)
     

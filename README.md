@@ -123,7 +123,7 @@ the order of elements visually does not change
   - `<if foo' bar' 0|`  evaluates to `|bar>` 
 
 - `rec` anonymous recursion
-  - `eval [rec gt 0 dup add 1]` evaluates to `|0>` (simple loop) 
+  - `eval [rec gt 0 dup add 1] -5` evaluates to `|0>` (simple loop from -5 to 0) 
 
 ### Built in primitives
 - stack shuffling operator: `swap` `dup` `drop`
