@@ -8,59 +8,66 @@ import (
     "fmt"
 )
 
-
 const cells = 100*1024*1024
 const gcMargin  = cells - 24
 const stackSize = 1024*1024
 
 // Tagbits (from right  to left)
+// three bits are used (from Bit 1 to Bit 3), Bit 4 is free and can be used for gc for tree traversals
 // local pointer, global pointer, Int, Prim, Symbol, Float
 // global pointers not used yet, will become meta gene pool of gene bracket
 // Bit 1 = 0 ->  Cons
-//    Bit 4 = 0 --> pointer to cell on local heap
-//    Bit 4 = 1 --> pointer to cell on global heap
+//    Bit 2 = 0 --> pointer to cell on local heap
+//    Bit 2 = 1 --> pointer to cell on global heap  (not used in the moment)
+//    Bit 3 = 0 --> list (or quotation)
+//    Bit 3 = 1 --> closure
+// Bit 1 = 1 ->  Number or Symb
+// Bit 2 = 0 --> Symb
+//    Bit 3 = 0 --> assignable symbol
+//    Bit 3 = 1 --> primitive
 // Bit 2 = 1 ->  Number
-//    Bit 4 = 0 --> Int
-//    Bit 4 = 1 --> Float
-// Bit 3 = 1 ->  Symbol
-//    Bit 4 = 0 --> assignable symbol
-//    Bit 4 = 1 --> primitive
+//    Bit 3 = 0 --> Int
+//    Bit 3 = 1 --> Float
 
-const tagType   = 15 // mask with bits 1111
-const tagLocal  = 0  // bits 0000    cell on local heap
-const tagGlobal = 8  // bits 1000    cell on global heap
-const tagPrim   = 1  // bits 0001
-const tagSymb   = 9  // bits 1001
-const tagInt    = 3  // bits 0011
-const tagFloat  = 11 // bits 1011
+const tagType    = 7  // mask with bits 111
+const tagGlobal  = 2  // bits 010    cell on global heap
+const tagCons    = 5  // bits 101
+const tagClosure = 4  // bits 100
+const tagPrim    = 5  // bits 101
+const tagSymb    = 1  // bits 001
+const tagNumb    = 2  // bits 010
+const tagInt     = 3  // bits 011
+const tagFloat   = 7  // bits 111
 
 type value int
 
-func boxCell(x int) value {return value(x<<4) }   // since taglocal=0
-func boxGlobal(x int) value {return value(x<<4 | tagGlobal)}
-func boxPrim(x int) value {return value(x<<4 | tagPrim)}
+func boxCell(x int) value {return value(x<<4) }   // create a new local cons
+func boxClosure(x int) value {return value(x<<4 | tagClosure)}   // create a new local closure
+//func boxGlobal(x int) value {return value(x<<4 | tagGlobal)}
+func boxPrim(x int) value {return value(x<<4 | tagPrim)}  // create a local primitive
 func boxSymb(x int) value {return value(x<<4 | tagSymb)}
 func boxInt(x int)  value {return value(x<<4 | tagInt)}
+
+// floats not yet interpreted
 //func box_float(x Int) Int { Int(reinterpret(Int32,x)) << 32 | tagFloat
+//func unbox_float(x value) float = reinterpret(Float32, Int32(x>>32))
 
 func unbox(x value) int  {return int(x)>>4}   // remove all tags
-
 // in contrast to C, here the pointer is
 // just the heap index, that is, a number
-func ptr(x value) int    {return int(x)>>4}   
-//func unbox_float(x value) float = reinterpret(Float32, Int32(x>>32))
+//func ptr(x value) int    {return int(x)>>4}   
 
 func isInt(x value)    bool {return (x & tagType == tagInt)}
 func isFloat(x value)  bool {return (x & tagType == tagFloat)}
 func isPrim(x value)   bool {return (x & tagType == tagPrim)}
 func isSymb(x value)   bool {return (x & tagType == tagSymb)}
-func isLocal(x value)  bool {return (x & tagType == tagLocal)}
-func isGlobal(x value) bool {return (x & tagType == tagGlobal)}
-
-func isCons(x value) bool {return (x & 1) == 0}
-func isAtom(x value) bool {return !isCons(x)}
-func isNumb(x value) bool {return (x & 3) == 3}
-func isAbstractSymb(x value) bool {return (x & 3) == 1}
+func isLocal(x value)  bool {return (x & tagGlobal == 0)}
+func isGlobal(x value) bool {return (x & tagGlobal == tagGlobal)}
+func isCons(x value)   bool {return (x & tagCons == 0)}
+func isClosure(x value) bool {return (x & tagCons == tagClosure)}
+func isAtom(x value)  bool {return !isCons(x)}
+func isNumb(x value)  bool {return (x & tagNumb) == tagNumb}
+func isAbstractSymb(x value) bool {return (x & tagNumb) == 0}  // symbol or primitive
 
 func isNil(x value) bool {return x == nill}
 func isDef(x value) bool {return x != nill}
@@ -87,6 +94,7 @@ const (  // bracket primitives
         eval
         rec
         def
+        lambda
         whl
         add
         sub
@@ -105,14 +113,14 @@ const (  // bracket primitives
 
 var primStr = map[value] string {
     cons:"cons", car:"car", cdr:"cdr", def:"def", dup:"dup", drop:"drop", 
-    esc:"esc", eval:"eval", eq:"eq", iff:"if", 
+    esc:"esc", eval:"eval", eq:"eq", iff:"if", lambda:"\\",
     rec:"rec", swap:"swap", val:"val", vesc:"vesc", whl:"whl",
     add:"+", sub:"-", mul:"*", div:"/", gt:">", lt:"<",trace:"trace",
 }
 
 var str2prim = map[string] value {
     "cons":cons, "car":car, "cdr":cdr, "def":def, "dup":dup, "drop":drop, 
-    "esc":esc, "eval":eval, "eq":eq, "if":iff, 
+    "esc":esc, "eval":eval, "eq":eq, "if":iff, "\\":lambda, "lambda":lambda,
     "rec":rec, "swap":swap, "val":val, "vesc":vesc, "whl":whl,
     "add":add, "+":add, "sub":sub, "-":sub, "*":mul, "mul":mul, "/":div, "div":div,
     "gt":gt, ">":gt, "lt":lt, "<":lt, "trace":trace,
@@ -144,7 +152,7 @@ type Vm struct {
 }
 
 func (vm *Vm) reset() {
-    vm.next = 0
+    vm.next = -1
     vm.stats = stats{0,0,0,0}
     vm.bra = nill
     vm.ket = nill
@@ -154,6 +162,7 @@ func (vm *Vm) reset() {
     vm.stackIndex = 0
     vm.depth = 0
     vm.trace = 0
+    vm.needGc = false
 }
 
 func init_vm() Vm {
@@ -161,28 +170,29 @@ func init_vm() Vm {
     b := make([]cell, cells)
     stack := make([]value, stackSize)
     stats := stats{0,0,0,0}
-    vm := Vm{nill,nill,nill,nill,nill,0,a,b,stack,0,false,0,stats,0}
+    vm := Vm{nill,nill,nill,nill,nill,-1,a,b,stack,0,false,0,stats,0}
     vm.env = vm.cons(nill,nill)
     return vm 
 }
 
 //  garbage collector  *********************************
 //  implement Cheney copying algorithm
-//    Cheney :       non-recursive traversal of live-objects
+//    Cheney :  non-recursive traversal of live-objects
 func (vm *Vm) relocate(c value) value {
    if !isCons(c) {
        return c
    }
-   indv := ptr(c)
+   indv := unbox(c)  // pointer is a heap index 
    ah := vm.brena[indv]
    if ah.car == unbound {
        return ah.cdr
    }
    ind := vm.next
+   bc := boxCell(ind)
    vm.arena[ind]   = vm.brena[indv]
-   vm.brena[indv] = cell{unbound, boxCell(ind)}
+   vm.brena[indv] = cell{unbound, bc}
    vm.next += 1
-   return boxCell(ind)
+   return bc
 }
 
 func (vm *Vm) gc() {
@@ -443,6 +453,7 @@ func (vm *Vm) replaceKey(key, val, env value) value {
     return env
 }
 
+/*
 func istrue(x value) bool {
     switch {
     case isNumb(x):
@@ -453,7 +464,11 @@ func istrue(x value) bool {
           return true
     }
 }
+*/
 
+func istrue(x value) bool {
+    return x != nill && unbox(x) != 0
+}
 
 
 // *******************************************
@@ -639,6 +654,10 @@ func (vm *Vm) fDef() {
    }
 }
 
+func (vm *Vm) fLambda() {
+
+}
+
 func (vm *Vm) fWhl() {
    fmt.Println("Start whl ")
    var q,b value
@@ -713,6 +732,8 @@ func (vm *Vm) evalPrim(p value) {
         vm.fRec()
     case def:
         vm.fDef()
+    case lambda:
+        vm.fLambda()
     case whl:
         vm.fWhl()
     case add:
@@ -799,9 +820,10 @@ func main() {
     //prog := "eval foo' 1 2 def foo' [add] trace 1"   
     
     //prog := "eval [ rec gt 0 dup add 1 ] -5 trace 1"
-    prog := "eval [rec gt 0 dup add 1 dup] -5 trace 0"
+    //prog := "eval [rec gt 0 dup add 1 dup] -5 trace 0"
+    //prog := "1 \\' 10  "
     //prog := "eval [ rec gt 0 dup add 1 ] -50000000"   // 5e7, 3.9 sec on MAc
-    //prog := "eval [ rec gt 0 dup add 1 ] -500000000"   // 5e8, 24.9 sec on MAc
+    prog := "eval [ rec gt 0 dup add 1 ] -500000000"   // 5e8, 24.9 sec on MAc
 
     vm.bra = vm.makeBra(prog)
     

@@ -1,5 +1,5 @@
 # Bracket
-Simple concatenative language geared towards genetic programming
+Simple concatenative functional language geared towards genetic programming
 
 
 ## Bracket is
