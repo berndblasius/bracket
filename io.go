@@ -80,13 +80,17 @@ func (vm *Vm) printElem(q value) {
 func (vm *Vm) printInnerList(list value, invert bool) {
    isDotted := false 
    var p value
-   if isCons(list) {
+   if isClosure(list) {
+       list = vm.car(list)
+   }
+   if isCell(list) {
       if invert {
           list, isDotted = vm.reverse(list)
+          //isDotted = false
       }
       vm.pop(&list, &p)
       vm.printElem(p)
-      if isDotted {   // dotted list that was reversee
+      if isDotted {   // dotted list that was reversed
             fmt.Print(" .")
       }
       for vm.pop(&list,&p) {

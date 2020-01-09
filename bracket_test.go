@@ -85,6 +85,7 @@ func TestBracket(t *testing.T) {
   test("cons [4 5] [1 2 3]", "[1 2 3 [4 5]]")
   test("cons car [1 2 3 4]", "[1 2 3 4]")
   test("cons car x' cdr x' def x' [1 2 3 4]", "[1 2 3 4]")
+  //test("cons 4 x'", "[x . 4]")  // dotted list
       
 
   // def, eval  
@@ -93,16 +94,30 @@ func TestBracket(t *testing.T) {
   test("x def x' 2",  "2")     
   test("x y x def y' 3 def x' 2",  "2 3 2")     
 
-  test("val x' def x' 2",   "2")
-  test("x` def x' 2",       "2")  // escape value of symbol to ket
-  test("val [1 2]",         "[1 2]")
-  test("[1 2]`",            "[1 2]")
-  test("x` def x' [1 2 3]", "[1 2 3]")  
+  test("val x' def x' 2",       "2")
+  test("x` def x' 2",           "2")  // escape value of symbol to ket
+  test("val [1 2]",             "[1 2]")
+  test("[1 2]`",                "[1 2]")
+  test("x` def x' [1 2 3]",     "[1 2 3]")  
+  test("val x' def x' [1 2 3]", "[1 2 3]")  
+  test("x def x' [1 2 3]",      "1 2 3")  
+  test("val x' def x' 3 x` def x' 2", "3 2")  
+
+  test("f 2 3 def f' [add]",     "5")
+  test("foo def foo' [add 1] 2", "3")
+  test("eval [x def x' 2]",  "2")     
 
 
-  test("eval [x def x' 2]",  "2")     // inner scope
-  test("eval [x def x' 2] def x' 3",  "2")     // inner scope
-  test("x eval [x def x' 2] x def x' 3",  "3 2 3")     // inner scope
+  test("x set x' 2",  "2")     
+  test("x y x set y' 3 set x' 2",  "2 3 2")     
+  test("f 2 3 set f' [add]",     "5")
+  test("eval [x set x' 2]",  "2")     
+
+  test("eval [x def x' 2] def x' 3",  "2")         // local scope
+  test("eval [x] def x' 2]",  "2")    // inner scope can use value defined outside     
+  test("eval [x] set x' 2]",  "2")    // inner scope can use value defined outside     
+  test("x eval [x def x' 2] x def x' 3",  "3 2 3")  // def changes only within scope
+  test("x eval [x set x' 2] x set x' 3",  "2 2 3")  // set changes also outside 
 
   test("eval [add 1] 2",    "3")
   test("eval [add] 1 2",    "3")
@@ -113,29 +128,60 @@ func TestBracket(t *testing.T) {
   test("eval foo' def foo' bar'", "bar")  
   //test("eval foo' 1 2 def foo' [add]", "3")  
   //test("eval foo' 1 2 def foo' add'", "3")  
+  
+  // lambda and lexical scoping
+  test("eval eval [       [x def x' + 1 x`] def x' 10] def x' 1", "2")
+  test("eval eval [lambda [x def x' + 1 x`] def x' 10] def x' 1", "11")
+  test("eval swap eval dup eval [lambda [x def x' + 1 x`] def x' 10] def x' 1", "12 11")
+  test("foo foo def foo' eval [lambda [x def x' + 1 x`] def x' 10] def x' 1","12 11")
 
-  test("foo def foo' [add 1] 2", "3")
+  test("100 eval [f def x' 20] def f' lambda [x] def x' 10","100 10")
+  test("100 eval [f def x' 20] def f'        [x] def x' 10","100 20")
+  test("100 g def g' [f def x' 20] def f' lambda [x] def x' 10","100 10")
+  test("  g g def g' [f def x' 20] def f' lambda [x] def x' 10","20 10")
+  // the 2nd evaluation of g is the last command and due to tail elimination
+  //  f is evaluated in the global scope
 
-  // math  
+  // closure
+  test("a 2 a 3 def a' [make_adder 4] a 2 a 3 def a' [make_adder 5]"+
+       "def make_adder' [addx def x']"+
+       "def addx' [+ x z def z']" , "6 7 7 8")
+
+
+  // math and logic 
   test("add 2 3", "5")
   test("+ 2 3", "5")
+  test("sub 3 2", "1")
   test("- 3 2", "1")
+  test("mul 3 2", "6")
   test("* 3 2", "6")
+  test("div 8 2", "4")
   test("/ 8 2", "4")
+  test("/ 8 0", "0")
+  test("- * 2 4 10", "-2")
+  test("lt 4 10", "1")
+  test("lt 10 4", "0")
   test("gt 10 4", "1")
   test("> 10 4", "1")
   test("> 10 10", "0")
   test("> 4 10", "0")
+
+  test("add 2 x' def x' 3", "5")
+  test("sub 3 x' def x' 2", "1")
+  test("sub y' 2 def y' 3", "1")
+  test("sub y' x' def y' 3 def x' 2", "1")
 
   // eq  
   test( "eq 2 2", "1")
   test("eq 2 3", "0")
   test("eq [] []", "1")
   test("eq [1 2 3] [1 2 3]", "1")
+  test("eq [1 2 3] [1 2 4]", "0")
   test("eq 2 []", "0")
   test("eq 2 x'", "0")
   test("eq x' x'", "1")
   test("eq y' x'", "0")
+  test("eq y' x' def y' x'", "0")
 
   // if  
   test( "if 20 30 1", "20")
@@ -148,7 +194,7 @@ func TestBracket(t *testing.T) {
   test("if foo' bar' 1", "foo")
 
   // recur
-  test("eval [ rec gt 0 dup add 1 ] -5", "0")   //loop
+  test("eval [ rec gt 0 dup add 1 ] -5", "0")   //simple loop
 
   test("__show results__", "")
 }
