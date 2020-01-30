@@ -80,9 +80,7 @@ func (vm *Vm) printElem(q value) {
 func (vm *Vm) printInnerList(list value, invert bool) {
    isDotted := false 
    var p value
-   if isClosure(list) {
-       list = vm.car(list)
-   }
+   vm.stripClosure(&list)
    if isCell(list) {
       if invert {
           list, isDotted = vm.reverse(list)
@@ -185,6 +183,7 @@ func tokenize(str []byte) [][]byte {
    str = bytes.ReplaceAll(str, []byte("]"), []byte(" ] "))
    str = bytes.ReplaceAll(str, []byte("'"), []byte(" esc "))
    str = bytes.ReplaceAll(str, []byte("`"), []byte(" vesc "))
+   str = bytes.ReplaceAll(str, []byte("\\"), []byte(" lambda "))
    str = removeComments(str)
    return bytes.Fields(str)
 }

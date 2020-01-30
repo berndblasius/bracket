@@ -9,9 +9,9 @@ import (
     "math/rand"
 )
 
-const cells = 100*1024*1024
+const cells = 2*1024*1024*1024
 const gcMargin  = cells - 24
-const stackSize = 1024*1024
+const stackSize = 104*1024*1024
 
 // Tagbits (from right  to left)
 // three bits are used (from Bit 1 to Bit 3), Bit 4 is free and can be used for gc for tree traversals
@@ -96,6 +96,7 @@ const (  // bracket primitives
         car
         cdr
         eval
+        dip
         rec
         def
         set
@@ -120,7 +121,7 @@ const (  // bracket primitives
 )
 
 var primStr = map[value] string {
-    cons:"cons", car:"car", cdr:"cdr", def:"def", dup:"dup", drop:"drop", 
+    cons:"cons", car:"car", cdr:"cdr", def:"def", dip:"dip", dup:"dup", drop:"drop", 
     esc:"esc", eval:"eval", eq:"eq", iff:"if", cond:"cond", lambda:"\\",
     rec:"rec", set:"set", swap:"swap", val:"val", vesc:"vesc", whl:"whl",
     add:"+", sub:"-", mul:"*", div:"/", gt:">", lt:"<",rnd:"rnd",trace:"trace",
@@ -128,7 +129,7 @@ var primStr = map[value] string {
 }
 
 var str2prim = map[string] value {
-    "cons":cons, "car":car, "cdr":cdr, "def":def, "dup":dup, "drop":drop, 
+    "cons":cons, "car":car, "cdr":cdr, "def":def, "dip":dip, "dup":dup, "drop":drop, 
     "esc":esc, "eval":eval, "eq":eq, "if":iff, "cond":cond, "\\":lambda, "lambda":lambda,
     "rec":rec, "set":set, "swap":swap, "val":val, "vesc":vesc, "whl":whl,
     "add":add, "+":add, "sub":sub, "-":sub, "*":mul, "mul":mul, "/":div, "div":div,
@@ -166,7 +167,7 @@ func init_vm() Vm {
     b := make([]cell, cells)
     stack := make([]value, stackSize)
     stats := stats{0,0,0,0}
-    vm := Vm{nill,nill,nill,nill,nill,-1,a,b,stack,0,false,0,stats,0}
+    vm := Vm{nill,nill,nill,nill,nill,-1,a,b,stack,-1,false,0,stats,0}
     vm.env = vm.cons(nill,nill)
     return vm 
 }
@@ -179,7 +180,7 @@ func (vm *Vm) reset() {
     vm.aux = nill
     vm.env = vm.cons(nill,nill)
     vm.root = nill
-    vm.stackIndex = 0
+    vm.stackIndex = -1
     vm.depth = 0
     vm.trace = 0
     vm.needGc = false
@@ -255,6 +256,12 @@ func (vm *Vm) cons(pcar, pcdr value) value {
 
 func (vm *Vm) closure(pcar, pcdr value) value {
     return boxClosure(vm.makeCons(pcar,pcdr))
+}
+
+func (vm *Vm) stripClosure(cl *value) {
+    if isClosure(*cl) {
+        *cl = vm.car(*cl)
+    } 
 }
 
 // ------- careful that we do not leak mutablilty
@@ -353,6 +360,25 @@ func (vm *Vm) length(list value) int {
    return n
 }
 
+// list length, without quoted values (but also including dotted pairs) 
+func (vm *Vm) lengthNonQuoted(list value) int {
+   n := 0
+   for isCell(list) {
+       elem := vm.car(list)
+       if elem == esc {    // a quoted element
+          if isDef(vm.cdr(list)) {  
+             list = vm.cdr(list)
+          }
+       } else if (elem != vesc && elem != lambda) {  // no quoted element
+          n += 1
+       }
+       list = vm.cdr(list)
+   }
+   if isDef(list) {  // count last element in dotted pair
+       n += 1
+   }
+   return n
+}
 
 // reverse a list
 // if list contained a dotted pair, reverse returns normal list
@@ -378,6 +404,8 @@ func (vm *Vm) reverse(list value) (value, bool) {
 }
 
 func (vm *Vm) isEqual(p1, p2 value) bool {
+   vm.stripClosure(&p1)
+   vm.stripClosure(&p2)
    if isCell(p1) && isCell(p2) { 
       return (vm.isEqual(vm.car(p1),vm.car(p2)) && 
               vm.isEqual(vm.cdr(p1),vm.cdr(p2)))
@@ -391,8 +419,8 @@ func (vm *Vm) pushStack(x value) {
     if vm.stackIndex == stackSize {
         panic("Vm stack overflow")
     }
-    vm.stack[vm.stackIndex] = x
     vm.stackIndex++;
+    vm.stack[vm.stackIndex] = x
 }
 
 // we don't check for underflow because it should never occur
@@ -400,8 +428,8 @@ func (vm *Vm) popStack() value {
     //if vm.stackIndex == 0 {
     //    return nill, errors.New("Vm stack underflow")
     //}
-    vm.stackIndex--
     x := vm.stack[vm.stackIndex]
+    vm.stackIndex--
     return x
 }
 
@@ -417,6 +445,15 @@ func (vm *Vm) replaceStack(x value) {
     vm.stack[vm.stackIndex] = x
 }
 
+func (vm *Vm) printStack() {
+    fmt.Println("stack: ")
+    for i:=0; i<vm.stackIndex; i++ {
+        vm.printElem(vm.stack[i]); fmt.Println()
+    }
+    fmt.Println()
+}
+
+
 // creates new empty environment
 func (vm *Vm) newEnv(env value) value {
     return vm.cons(nill,env)
@@ -426,6 +463,9 @@ func (vm *Vm) newEnv(env value) value {
 
 func (vm *Vm) findLocalKey(key, env value) value {
 // search binding with key in current (= top of env) frame 
+    if isNil(key) {
+        return nill
+    }
     for bnds := vm.car(env); isCell(bnds); bnds = vm.cdr(bnds) {
        bnd := vm.car(bnds)
        if vm.car(bnd) == key {
@@ -437,6 +477,9 @@ func (vm *Vm) findLocalKey(key, env value) value {
 
 func (vm *Vm) findKey(key value) value {
 // search binding with key in whole environment 
+    if isNil(key) {
+        return nill
+    }
     for env:=vm.env; isDef(env); env = vm.cdr(env) {
        bnd := vm.findLocalKey(key, env)
        if isDef(bnd) {
@@ -524,19 +567,22 @@ func (vm *Vm) fSwap() {
 func (vm *Vm) fCons() {
     var p1,p2 value
     if vm.pop2(&vm.ket, &p1, &p2) {
-      vm.ket = vm.cons(vm.cons(p1,p2),vm.ket)
+        vm.stripClosure(&p2)
+        vm.ket = vm.cons(vm.cons(p1,p2),vm.ket)
     }
 }
 
 func (vm *Vm) fCar() {
     var head, p value
     if vm.pop(&vm.ket, &p) {
+        vm.stripClosure(&p)
         if vm.pop(&p, &head) { // car a list
             vm.ket = vm.cons(p,vm.ket) // leave the rest of the list on the ket 
             vm.ket = vm.cons(head,vm.ket)
         } else {    // car a symbol
           val := vm.boundvalue(p)   // lookup symbol.. 
-          if isCell(val) {
+          vm.stripClosure(&val)
+          if isCons(val) {
               vm.ket = vm.cons(vm.car(val),vm.ket)
           }
         }
@@ -546,11 +592,13 @@ func (vm *Vm) fCar() {
 func (vm *Vm) fCdr() {
     var head,p value
     if vm.pop(&vm.ket, &p) {
+        vm.stripClosure(&p)
         if vm.pop(&p, &head) { // cdr a list
             vm.ket = vm.cons(p,vm.ket) 
         } else {
           val := vm.boundvalue(p)   // lookup symbol.. 
-          if isCell(val) {
+          vm.stripClosure(&val)
+          if isCons(val) {
               vm.ket = vm.cons(vm.cdr(val),vm.ket)
           } else {
               vm.ket = vm.cons(nill,vm.ket)  // at least leave a nill on ket
@@ -587,6 +635,7 @@ func myLt(x,y int) int {
 }
 
 func (vm *Vm) fMath(op mathIntFunc) {
+    // STILL NEED TO CHECK FOR CLOSURES AND LISTS!!
     var n1,n2 value
     if vm.pop2(&vm.ket, &n1, &n2) {
       if isSymb(n1) {
@@ -611,6 +660,7 @@ func (vm *Vm) fRnd() {
               p = boxInt(0)
             }
         } else if isCell(p) {
+            vm.stripClosure(&p)
             n := vm.length(p)
             n1 := rand.Intn(n)
             for i:=0; i<n1; i++ {
@@ -642,44 +692,38 @@ func (vm *Vm) fIf() {
    }
 }
 
+func (vm *Vm) fDip() {
+   var q1,q2 value
+   if vm.pop2(&vm.ket,&q1, &q2) {
+        vm.pushStack(q2) 
+        vm.doEval(q1)
+        q2 = vm.popStack()
+        vm.ket = vm.cons(q2, vm.ket)
+   }
+}
+
 func (vm *Vm) fCond() {
    var b, p, p1, p2 value
    if vm.pop(&vm.ket, &p) {
-      if vm.pop(&p, &p1) {
-        fmt.Println("Cond")
-        vm.printElem(p1);fmt.Println()
-        vm.printElem(p);fmt.Println()
-         if vm.pop(&p,&p2) {
-            vm.root = vm.cons(vm.bra,vm.root)
-            vm.root = vm.cons(p2,vm.root)
-            vm.root = vm.cons(p,vm.root)
-            vm.bra = vm.cons(p1, vm.bra)
-            vm.evalBra()
-
-            //vm.bra = vm.cons(cond, vm.bra)
-            //vm.bra = vm.cons(iff, vm.bra)
-            //vm.bra = vm.cons(p2, vm.bra)
-            //vm.bra = vm.cons(p1, vm.bra)
-            //vm.bra = vm.cons(p, vm.bra)
+      if isAtom(p) {
+          p = vm.boundvalue(p)
+      }
+      for vm.pop(&p, &p1) {
+         if vm.pop(&p,&p2) { 
+            vm.pushStack(p) 
+            vm.doEval(p1)
+            p = vm.popStack()
             if vm.pop(&vm.ket, &b) && istrue(b) {
-                vm.bra = vm.cons(p2, vm.bra)
-                vm.evalBra()
-            } else {
-               vm.bra = vm.cons(cond, vm.bra)
-               vm.ket = vm.cons(p, vm.ket)
+                vm.doEval(p2)
+                return
             }
          } else {
-            //vm.bra = vm.cons(p1, vm.bra)
             vm.doEval(p1)
-         }  
+            return
+        }
       }
    }
 }
-//def [cond1 [[xs b]]' ]
-//  [eval if [b] [cond1 if car xs` b] isNil xs`]
-
-//def [cond1 [[xs x b]]'] 
-//  [eval if [b] [eval if  x` [cond1 xs`] b] isNil x`]
 
 func (vm *Vm) fWhl() {
    fmt.Println("Start whl ")
@@ -722,6 +766,7 @@ func (vm *Vm) fVesc() {
 func (vm *Vm) fVal() {
     var key value
     if vm.pop(&vm.ket, &key) { 
+        //vm.stripClosure(&key)
         if isCell(key) {
           vm.ket = vm.cons(key,vm.ket)
         } else {
@@ -751,21 +796,138 @@ func (vm *Vm) fRec() {
     var b value
     if vm.pop(&vm.ket,&b) { // pop a boolean value
         if istrue(b) {
+            //q = vm.getStack()
+            //vm.bra = q
             vm.bra = vm.getStack()
         }
     }
 }
 
-func (vm *Vm) fDef() {
-   var key, val value
-   if vm.pop2(&vm.ket, &key, &val) {
-       if isAtom(key) {
-         vm.bindKey(key,val)  // bind key to val in top env-frame
+func (vm *Vm) fLambda() {
+   var quote,keys value
+   if vm.pop2(&vm.ket, &keys, &quote) {
+       if isAtom(quote) {
+          quote = vm.boundvalue(quote)
        }
-       //vm.printList(vm.env); fmt.Println()
-       //vm.printList(vm.car(vm.env)); fmt.Println()
+       if isAtom(quote) { // we need a quotation to do lambda
+           return
+       } 
+       if isDef(keys) {                 // if arguments are not nill ..
+           quote = vm.cons(def, quote)  // .. push a definition on quote
+           quote = vm.cons(keys, quote)
+               if isAtom(keys) {
+                   quote = vm.cons(esc, quote)
+               }
+       }
+       if isCons(quote) { // make a closure (only of not yet)
+          env := vm.newEnv(vm.env)
+          vm.ket = vm.cons(vm.closure(quote,env), vm.ket)
+       }
    }
 }
+
+/*
+func (vm *Vm) pushN(list value, n int) (value, int) {
+// take  at most n values from ket and push to list
+// return list and number of pushed values
+// keep list save in case of gc 
+    l := nill           
+    n1 = 0
+    for i:=0; i<n; i++ {
+        if vm.pop(&vm.ket, &val) {
+            n1 += 1   
+            l = vm.cons(val,l)
+            if vm.needGc {
+                vm.pushStack(list)
+                vm.gc()
+                list = vm.popstack()
+            }
+        } else {
+            break       // ket to small 
+        }
+    } 
+    return l, n1
+}
+*/
+
+func (vm *Vm) deepBind(keys, val value) {
+// recursively bind all values of list keys to atom val
+// keys must be a list, val an atom
+    //vm.printElem(keys); fmt.Println()
+    //vm.printElem(val); fmt.Println()
+    var key value
+    for vm.pop(&keys,&key) {
+        if isAtom(key) {
+            vm.bindKey(key,val)
+            if vm.needGc {
+                vm.pushStack(keys)
+                vm.gc()
+                keys = vm.popStack()
+            }
+        } else {  // key itself is a list
+            vm.pushStack(keys)
+            vm.deepBind(key, val)
+            keys = vm.popStack()
+        }
+    }
+} 
+
+func (vm *Vm) match(keys, vals value) {
+// bind elements from keys to elements from vals with pattern matching
+// keys must be a list
+    //fmt.Println("match")
+    //vm.printElem(keys); fmt.Println()
+    //vm.printElem(vals); fmt.Println()
+   var key, val value
+   if isAtom(vals) {
+       vm.deepBind(keys, vals)
+   }
+   for vm.pop(&keys, &key) {
+       if isNil(keys) {
+           vm.bindKey(key,vals)
+       } else {
+           vm.pop(&vals, &val)
+           vm.bindKey(key,val)
+       }
+       if isAtom(vals) {
+         vm.deepBind(keys, vals)
+         return
+       }
+   }
+}
+
+func (vm *Vm) fDef() {
+   var key, k, val value
+   var n1 int
+   if vm.pop(&vm.ket, &key) {
+       if isAtom(key) { 
+           if vm.pop(&vm.ket, &val) {
+              vm.bindKey(key,val)  // bind key to val in top env-frame
+           }
+       } else if isDef(key) {      // binding a list of keys
+           n := vm.lengthNonQuoted(key)
+           n1 = 0    // push max n values from ket to stack
+           for i:=0; i<n && vm.pop(&vm.ket, &val); i++ {
+                   n1 += 1   
+                   vm.pushStack(val)
+           } 
+           for i:=0; i<n1; i++ {  // make the bindings
+               vm.pop(&key, &k) 
+               if k == vesc && vm.pop(&key, &k){  // this is interpreted as set
+                  vm.setKey(k,vm.popStack())
+               } else if isAtom(k) {
+                  vm.bindKey(k,vm.popStack())
+               } else {
+                  elem := vm.popStack()
+                  vm.pushStack(key)  // safe key in case of gc
+                  vm.match(k,elem)
+                  key = vm.popStack()
+               }
+           }
+       }
+   }
+}
+
 
 func (vm *Vm) fSet() {
    var key, val value
@@ -778,7 +940,34 @@ func (vm *Vm) fSet() {
    }
 }
 
-
+func (vm *Vm) doEval(op value) {
+    if isNil(op) {
+        return
+    } else if isSymb(op) {
+        op = vm.boundvalue(op)
+    }
+    if isNumb(op) || isSymb(op) {
+        vm.ket = vm.cons(op,vm.ket)
+        return
+    } 
+    vm.depth++
+    vm.pushStack(vm.env)
+    vm.pushStack(vm.bra)
+    if isCons(op) {
+        vm.bra = op
+        vm.env = vm.newEnv(vm.env)
+    } else if isClosure(op) {
+       vm.bra = vm.car(op)
+       vm.env = vm.cdr(op)
+    } else {
+       vm.bra = vm.cons(op,nill)
+       vm.env = vm.newEnv(vm.env)
+    }
+    vm.evalBra()
+    vm.depth--
+    vm.bra = vm.popStack()
+    vm.env = vm.popStack()
+}
 
 func (vm *Vm) fEval() {
     var op value
@@ -800,23 +989,6 @@ func (vm *Vm) fEval() {
     }
 }
 
-func (vm *Vm) doEval(op value) {
-    switch {
-    case isCons(op):
-        vm.evalCons(op)
-    case isClosure(op):
-        vm.evalClosure(op)
-    case isNil(op):
-        return
-    case isPrim(op):
-            vm.evalPrim(op)
-    case isSymb(op):
-            vm.evalSymb(op) 
-    default:   // eval a number
-            vm.evalNumb(op)
-    }
-}
-
 func (vm *Vm) evalCons(op value) {
     if isCell(vm.bra) {
        vm.depth++
@@ -832,7 +1004,7 @@ func (vm *Vm) evalCons(op value) {
 
 func (vm *Vm) evalClosure(clos value) {
     op := vm.car(clos)
-    env := vm.cdr(clos)
+    env := vm.newEnv(vm.cdr(clos))
     if isCell(vm.bra) {  // no tail position
        vm.depth++
        vm.pushStack(vm.env)
@@ -845,38 +1017,20 @@ func (vm *Vm) evalClosure(clos value) {
     vm.bra = op
 }
 
-func (vm *Vm) fLambda() {
-   var val value
-   if vm.pop(&vm.ket, &val) {
-       if isCell(val) {
-          env := vm.newEnv(vm.env)
-          vm.ket = vm.cons(vm.closure(val,env), vm.ket)
-       }
-   }
-}
-
 
 func (vm *Vm) evalNumb(n value) {
     vm.ket = vm.cons(n,vm.ket)
 }
 
-
 func (vm *Vm) evalSymb(sym value) {
-    //bnd := vm.binding(sym,vm.env)
-    bnd := vm.findKey(sym)
-    if isNil(bnd) {
-       vm.ket = vm.cons(nill,vm.ket)
+    val := vm.boundvalue(sym)
+    if isCons(val) {
+        vm.evalCons(val)
+    } else if isClosure(val) {
+        vm.evalClosure(val)
     } else {
-       val := vm.cdr(bnd)
-       if isCons(val) {
-          vm.evalCons(val)
-       } else if isClosure(val) {
-          vm.evalClosure(val)
-       } else {
-          vm.ket = vm.cons(val,vm.ket)
-       }
+        vm.ket = vm.cons(val,vm.ket)
     }
-
 }
 
 func (vm *Vm) evalPrim(p value) {
@@ -895,6 +1049,8 @@ func (vm *Vm) evalPrim(p value) {
         vm.fCdr()
     case eval:
         vm.fEval()
+    case dip:
+        vm.fDip()
     case rec:
         vm.fRec()
     case def:
@@ -940,6 +1096,7 @@ func (vm *Vm) evalPrim(p value) {
         
     }
 }
+
 
 func (vm *Vm) evalBra() {
       //fmt.Println("Start eval ")
@@ -1000,7 +1157,6 @@ func main() {
     //prog := "eval [ rec gt 0 dup add 1 ] -50000000"   // 5e7, 3.9 sec on MAc
     //prog := "eval [ rec gt 0 dup add 1 ] -500000000"   // 5e8, 24.9 sec on MAc
     
-    //prog := "rnd 3 rnd 3 rnd 3 rnd 3 rnd 3 rnd 3 rnd 3"
     //prog := "eval eval [ lambda [x def x' + 1 x`] def x' 10] def x' 1 trace 1"
     //prog := "foo foo foo def foo' eval [ lambda [x def x' + 1 x`] def x' 10] def x' 1 trace 1"
     //prog := "x` foo def x' 10 def foo' [lambda [x`] def x' 1] x` def x' 2"
@@ -1017,13 +1173,33 @@ func main() {
     //prog := "g def g' [f def x' 20] def f' lambda [x] def x' 10"
     //prog := "11 eval [5 f def x' 20] def f' lambda [x] def x' 10 trace 1"
 
-    //prog := "eval eval [ lambda [x def x' + 1 x`] def x' 10] def x' 1 trace 1"
+    //prog := "f def f' lambda x' [+ x 1] 10 trace 1"
+    //prog := "a b def [a b] 1 [2 3]"
+    //prog := "a` b` def [a b] 1 [2 3]"
+    //prog := "x eval [x def [x`] 2] x def x' 3 trace 1"
+    //prog := "x x def [x`] 2 x def x' 3 trace 0"
+    //prog := "x x def [x`] 2 trace 1"
+    //prog := "a` b` def [[a b]] [1 2 3]"
 
-    prog := "eval [5 f def x' 20] def f' lambda [x] def x' 10 trace 1"
-    //prog := "1 def f' lambda [x] def x' 10 trace 0"
-   
-    //prog := "cond [[2]] trace 0"                
+    //prog := "eq g`  f` def g' \\ [x] [1 2 'A] def f' \\ [x] [1 2 'A] def foo' 2"
+    //test("cond [[2]]",       "2")                 
+    //prog := "cond [[10 ] [11 ] [0]] trace 1"
+    //test("cond [[10 drop] [11 drop] [1]]",   "11")
+    //test("cond [[3] [1 drop] [eq 4] [2 drop] [lt 4 dup]] 3", "3")                 
+    //test("cond [[3] [1 drop] [eq 4] [2 drop] [lt 4 dup]] 5", "2")                 
+    //prog := "cond foo' 5 def foo' [[3] [1 drop] [eq 4] [2 drop] [lt 4 dup]]"
+
+    //prog := "cond [[2]] trace` 0"                
     //prog := "100 cond [[10 drop] [11 drop] [1]] trace 1"
+
+     //prog := "eval eval [\\[] [x def [x`] + 1 x`]] def x' 10" //"12 11")
+     //prog := "foo foo def foo' eval [\\[] [x set x' + 1 x`]] def x' 10" //"12 11")
+
+    prog := "ack 3 10 def ack' \\[m n]"+
+    "[cond "+
+    "  [ [ack - m 1 ack m - n 1]"+
+    "    [ack - m 1 1]  [eq 0 n]"+
+    "    [+ n 1]  [eq 0 m]] ]"
 
     vm.bra = vm.makeBra(prog)
     //vm.bra = vm.loadFile("test.clj")
@@ -1039,11 +1215,16 @@ func main() {
 
     vm.printKet(vm.ket)
     
-    e :=  vm.env
+    //e :=  vm.env
     //e1 := vm.car(e)
     //e2 := vm.cdr(e1)
-    vm.printKet(e)
+    //vm.printKet(e)
 
 }
 
 
+/* todos
+   defining the symbol ket, creates a new local ket in 
+   the current environment (could be useful in combination 
+with closures)
+*/
