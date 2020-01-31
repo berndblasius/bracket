@@ -9,9 +9,9 @@ import (
     "math/rand"
 )
 
-const cells = 2*1024*1024*1024
+const cells = 12*1024*1024
 const gcMargin  = cells - 24
-const stackSize = 104*1024*1024
+const stackSize = 1024*1024
 
 // Tagbits (from right  to left)
 // three bits are used (from Bit 1 to Bit 3), Bit 4 is free and can be used for gc for tree traversals
@@ -190,20 +190,26 @@ func (vm *Vm) reset() {
 //  implement Cheney copying algorithm
 //    Cheney :  non-recursive traversal of live-objects
 func (vm *Vm) relocate(c value) value {
+   var c1 value
    if !isCell(c) {
        return c
    }
-   indv := unbox(c)  // pointer is a heap index 
-   ah := vm.brena[indv]
-   if ah.car == unbound {
-       return ah.cdr
+   indb := unbox(c)   // index into brena array
+   bcell := vm.brena[indb]
+   if bcell.car == unbound {
+       return bcell.cdr
    }
-   ind := vm.next
-   bc := boxCons(ind)
-   vm.arena[ind]   = vm.brena[indv]
-   vm.brena[indv] = cell{unbound, bc}
+   inda := vm.next    // index into arena
+   if isCons(c) {
+     c1 = boxCons(inda)
+   } else {
+     c1 = boxClosure(inda)
+   }
+   //vm.arena[ind]   = vm.brena[indv]
+   vm.arena[inda]  = bcell
+   vm.brena[indb] = cell{unbound, c1}
    vm.next += 1
-   return bc
+   return c1
 }
 
 func (vm *Vm) gc() {
@@ -226,14 +232,18 @@ func (vm *Vm) gc() {
    // scan remaining objects in arena (including objects added by this loop)
    for finger < vm.next {
       c = vm.arena[finger]
-      vm.arena[finger] = cell{vm.relocate(c.car), vm.relocate(c.cdr)}
+      rcar := vm.relocate(c.car)
+      rcdr := vm.relocate(c.cdr)
+      vm.arena[finger] = cell{rcar,rcdr}
+      //vm.arena[finger] = cell{vm.relocate(c.car), vm.relocate(c.cdr)}
       finger += 1
   }
 
-   //println("GC: live objects found: ", vm.next-1)
-
+   fmt.Println("GC: live objects found: ", vm.next-1)
+   fmt.Println("stack ", vm.stackIndex)
    if vm.next >= gcMargin {
        fmt.Println("Bracket GC, arena too small")
+        panic("Vm stack overflow")
    }
    vm.needGc = false
    fmt.Println("GC finished")
@@ -1195,11 +1205,18 @@ func main() {
      //prog := "eval eval [\\[] [x def [x`] + 1 x`]] def x' 10" //"12 11")
      //prog := "foo foo def foo' eval [\\[] [x set x' + 1 x`]] def x' 10" //"12 11")
 
-    prog := "ack 3 10 def ack' \\[m n]"+
+    prog := "ack 3 7 def ack' \\[m n]"+
     "[cond "+
     "  [ [ack - m 1 ack m - n 1]"+
     "    [ack - m 1 1]  [eq 0 n]"+
     "    [+ n 1]  [eq 0 m]] ]"
+
+    /*prog := "ack 3 8 def ack' "+
+    "[cond "+
+    "  [ [ack - m 1 ack m - n 1]"+
+    "    [ack - m 1 1]  [eq 0 n]"+
+    "    [+ n 1]  [eq 0 m]] def [m n]]"
+*/
 
     vm.bra = vm.makeBra(prog)
     //vm.bra = vm.loadFile("test.clj")
@@ -1224,6 +1241,8 @@ func main() {
 
 
 /* todos
+   - problem with GC of Ackermann function !!!
+
    defining the symbol ket, creates a new local ket in 
    the current environment (could be useful in combination 
 with closures)
