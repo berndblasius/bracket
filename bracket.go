@@ -9,7 +9,8 @@ import (
     "math/rand"
 )
 
-const cells = 12*1024*1024
+const cells = 24*1024*1024
+//const cells = 1024*1024
 const gcMargin  = cells - 24
 const stackSize = 1024*1024
 
@@ -146,7 +147,7 @@ type stats struct { // some statistics about the running program
 // virtual machine
 type Vm struct {
     bra  value    // program, future of computation
-    ket  value    // result, past of computation
+    ket  value    // global data stack, past of computation
     aux  value    // auxilliary stack (helps with stack shuffling)
     env  value    // environment
     root value    // anchor to save stuff for gc
@@ -194,7 +195,7 @@ func (vm *Vm) relocate(c value) value {
    if !isCell(c) {
        return c
    }
-   indb := unbox(c)   // index into brena array
+   indb := unbox(c)   // index into brena
    bcell := vm.brena[indb]
    if bcell.car == unbound {
        return bcell.cdr
@@ -240,7 +241,7 @@ func (vm *Vm) gc() {
   }
 
    fmt.Println("GC: live objects found: ", vm.next-1)
-   fmt.Println("stack ", vm.stackIndex)
+   fmt.Println("stack ", vm.stackIndex, " ", vm.depth)
    if vm.next >= gcMargin {
        fmt.Println("Bracket GC, arena too small")
         panic("Vm stack overflow")
@@ -277,7 +278,7 @@ func (vm *Vm) stripClosure(cl *value) {
 // ------- careful that we do not leak mutablilty
 //         should be used only for environments
 // modify car or cdr of a cell without allocating a new cell
-// only to be used for bindings
+// should only be used for bindings
 func (vm *Vm) setcar(cl value, newcar value) {
     ind := unbox(cl)
     vm.arena[ind].car = newcar 
@@ -291,21 +292,6 @@ func (vm *Vm) setcdr(cl value, newcdr value) {
     //pcar := vm.arena[ind].car
     //vm.arena[ind] = cell{pcar, newcdr} 
 }
-
-/*
-func (vm *Vm) mutableCons(bnd value, frame value) {
-    // mutably cons an a new element into list 
-    // used only to insert a new binding into a frame
-    ind := unbox(frame)
-    c := vm.arena[ind]
-    vm.next += 1
-    if vm.next > gcMargin {
-      vm.needGc = true
-    }
-    vm.arena[vm.next] = c
-    vm.arena[ind] = cell{bnd,boxCons(vm.next)}
-}
-*/
 
 // -------------------------------------------------
 
@@ -577,7 +563,8 @@ func (vm *Vm) fSwap() {
 func (vm *Vm) fCons() {
     var p1,p2 value
     if vm.pop2(&vm.ket, &p1, &p2) {
-        vm.stripClosure(&p2)
+        vm.stripClosure(&p2) // cons to a closure strips the closure
+        // instead here we could cons to the quotation of the closure
         vm.ket = vm.cons(vm.cons(p1,p2),vm.ket)
     }
 }
@@ -654,6 +641,7 @@ func (vm *Vm) fMath(op mathIntFunc) {
       if isSymb(n2) {
           n2 = vm.boundvalue(n2) 
       }
+      // Here we should check that n1 and n2 are numbers now !!!!
       n3 := boxInt(op(unbox(n1), unbox(n2)))
       vm.ket = vm.cons(n3,vm.ket)
   }
@@ -719,10 +707,12 @@ func (vm *Vm) fCond() {
           p = vm.boundvalue(p)
       }
       for vm.pop(&p, &p1) {
-         if vm.pop(&p,&p2) { 
+         //if vm.pop(&p,&p2) { 
+         if isCell(p) { 
             vm.pushStack(p) 
             vm.doEval(p1)
             p = vm.popStack()
+            vm.pop(&p,&p2)  // delay the pop to protect p2 from gc
             if vm.pop(&vm.ket, &b) && istrue(b) {
                 vm.doEval(p2)
                 return
@@ -806,8 +796,6 @@ func (vm *Vm) fRec() {
     var b value
     if vm.pop(&vm.ket,&b) { // pop a boolean value
         if istrue(b) {
-            //q = vm.getStack()
-            //vm.bra = q
             vm.bra = vm.getStack()
         }
     }
@@ -825,9 +813,9 @@ func (vm *Vm) fLambda() {
        if isDef(keys) {                 // if arguments are not nill ..
            quote = vm.cons(def, quote)  // .. push a definition on quote
            quote = vm.cons(keys, quote)
-               if isAtom(keys) {
-                   quote = vm.cons(esc, quote)
-               }
+           if isAtom(keys) {
+               quote = vm.cons(esc, quote)
+           }
        }
        if isCons(quote) { // make a closure (only of not yet)
           env := vm.newEnv(vm.env)
@@ -891,12 +879,13 @@ func (vm *Vm) match(keys, vals value) {
    var key, val value
    if isAtom(vals) {
        vm.deepBind(keys, vals)
-   }
+       return
+   }                             // Q: do we need an else here??
    for vm.pop(&keys, &key) {
        if isNil(keys) {
            vm.bindKey(key,vals)
        } else {
-           vm.pop(&vals, &val)
+           vm.pop(&vals, &val)   // Q: do we need to check that vals is a list??
            vm.bindKey(key,val)
        }
        if isAtom(vals) {
@@ -923,6 +912,7 @@ func (vm *Vm) fDef() {
            } 
            for i:=0; i<n1; i++ {  // make the bindings
                vm.pop(&key, &k) 
+               // Q: do need to check that key is still a list in the line below??
                if k == vesc && vm.pop(&key, &k){  // this is interpreted as set
                   vm.setKey(k,vm.popStack())
                } else if isAtom(k) {
@@ -1110,6 +1100,7 @@ func (vm *Vm) evalPrim(p value) {
 
 func (vm *Vm) evalBra() {
       //fmt.Println("Start eval ")
+      // Q: should we check for isAtom(vm.bra) ??
     startingDepth := vm.depth
     vm.pushStack(vm.bra)
     var e value
@@ -1205,17 +1196,20 @@ func main() {
      //prog := "eval eval [\\[] [x def [x`] + 1 x`]] def x' 10" //"12 11")
      //prog := "foo foo def foo' eval [\\[] [x set x' + 1 x`]] def x' 10" //"12 11")
 
-    prog := "ack 3 7 def ack' \\[m n]"+
+
+    prog := "ack 3 10 def ack' \\[m n]"+
     "[cond "+
     "  [ [ack - m 1 ack m - n 1]"+
     "    [ack - m 1 1]  [eq 0 n]"+
     "    [+ n 1]  [eq 0 m]] ]"
 
-    /*prog := "ack 3 8 def ack' "+
+
+   /* prog := "ack 3 8 def ack' "+
     "[cond "+
     "  [ [ack - m 1 ack m - n 1]"+
     "    [ack - m 1 1]  [eq 0 n]"+
     "    [+ n 1]  [eq 0 m]] def [m n]]"
+
 */
 
     vm.bra = vm.makeBra(prog)

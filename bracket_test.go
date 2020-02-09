@@ -88,14 +88,21 @@ func TestBracket(t *testing.T) {
   //test("cons 4 x'", "[x . 4]")  // dotted list
       
 
-  // def, eval  
+  // def, val  
   test("def x' 2 10", "10")    // x bound to 2, def consumes value on ket
   test("x",           "[]")    // unbound variable evaluates to nill
   test("x def x' 2",  "2")     
   test("x y x def y' 3 def x' 2",  "2 3 2")     
+  
+  test("foo-bar def foo-bar' 2", "2")         // dash in symbol name
+  test("foo_bar def foo_bar' 2", "2")         // underscore in symbol name
+  test("foo1 def foo1' 2", "2")               // digit in symbol name
+  test("Fo-13_g def Fo-13_g' 2", "2")         // digit in symbol name
+  test("f123456789  def f123456789' 2", "2")  // symbol name with 10 characters
 
   test("val x' def x' 2",       "2")
-  test("x` def x' 2",           "2")  // escape value of symbol to ket
+  test("x vesc def x' 2",       "2")  // vesc, escape value of symbol to ket
+  test("x` def x' 2",           "2")  // backtick = short for vesc
   test("val [1 2]",             "[1 2]")
   test("[1 2]`",                "[1 2]")
   test("x` def x' [1 2 3]",     "[1 2 3]")  
@@ -105,7 +112,8 @@ func TestBracket(t *testing.T) {
 
   test("f 2 3 def f' [add]",     "5")
   test("foo def foo' [add 1] 2", "3")
-  test("eval [x def x' 2]",  "2")     
+  test("foo 1 2 def foo' [add]", "3")    // def a symbol that is not builtin
+  test("foo 1 2 def foo' add'", "+ 1 2") // this not 
 
   test("a def [a] 2",             " 2")    // def: bind a list of keys
   test("a b def [a b] 1 2",       "1 2")    
@@ -131,6 +139,7 @@ func TestBracket(t *testing.T) {
   test("f 2 3 set f' [add]",     "5")
   test("eval [x set x' 2]",  "2")     
 
+  test("eval [x def x' 2]",  "2")     
   test("eval [x def x' 2] def x' 3",  "2")         // local scope
   test("eval [x] def x' 2]",  "2")    // inner scope can use value defined outside     
   test("eval [x] set x' 2]",  "2")    // inner scope can use value defined outside     
@@ -147,9 +156,7 @@ func TestBracket(t *testing.T) {
   test("eval add' 1 2",     "3")    // eval symbol
   test("eval foo' def foo' 5", "5")  
   test("eval foo' def foo' bar'", "bar")  
-  //test("eval foo' 1 2 def foo' [add]", "3")  
-  //test("eval foo' 1 2 def foo' add'", "3")  
-  
+
 
   // lambda and lexical scoping
   test("lambda x' [+ x 1]","[+ x 1 def x']")
@@ -253,8 +260,8 @@ func TestBracket(t *testing.T) {
   test("cond foo' 5 def foo' [[3] [1] [eq 4] [2 drop] [lt 4 dup]]", "2")    
 
   // recur
-  test("eval [ rec gt 0 dup add 1 ] -5", "0")   //simple loop
-  test("foo def foo' [ rec gt 0 dup add 1 ] -5", "0")   //simple loop
+  test("eval [ rec gt 0 dup add 1 dup] -5", "0 -1 -2 -3 -4 -5")   //simple loop
+  test("foo def foo' [ rec gt 0 dup add 1 dup] -5", "0 -1 -2 -3 -4 -5")   //simple loop
 
 
   // small examples, to give a feeling for the language

@@ -4,10 +4,10 @@ Simple concatenative functional language geared towards genetic programming
 
 ## Bracket is
 - a simple, stack-based, functional, [concatenative language](https://en.wikipedia.org/wiki/Concatenative_programming_language)
-- geared towards genetic programming, meaning i) that code is terse, having a minimal syntax, and ii) diversity of language features had been traded-off for the ability to efficiently store and compute a huge number of programs in series
+- geared towards genetic programming, meaning i) that code is terse, having a minimal syntax, and ii) the diversity of language features is traded-off for the ability to efficiently store and run a large number of small programs in series
 - inspired by concatenative languages, such as [Joy](http://www.kevinalbrecht.com/code/joy-mirror/joy.html), [Factor](http://factorcode.org), [Consize](https://github.com/denkspuren/consize),
 [Postscript](https://en.wikipedia.org/wiki/PostScript)
-- includes (dynamically) lexically scoped variables and a normal (prefix) Polish notation
+- includes dynamically and lexically scoped variables, closures, and a normal (prefix) Polish notation
 - here implemented in go (other implementation exist in Julia and C)
 
 - still a work in progress...
@@ -19,17 +19,17 @@ The underlying assumption being that a functional language allows for terse,
 very compact programs. A concatenative language ensures a minimal syntax, which
 facilitates mutations of programs and helps to ensure that every syntacically correct code yields a running program. Thus, Bracket combines the expressive power of a
 Lisp with the minimai syntax of Forth. 
-Bracket includes tail recursion, lexically scoped enviroments and closures, but function arguments are passed on the global stack (the ket).
+Bracket includes tail recursion, lexically scoped enviroments and closures, but function arguments are passed on a global stack (the ket).
 
 To make the similarity to lisp-languages
-even more transparent, Bracket uses a normal Polish notation (rather than reversed
-Polish notation, as used by most other concatenative languages). While unsual at first,
-this leads to a remarkable formal similarity between Bracket and lisp code.
+more transparent, Bracket uses a normal (prefix) Polish notation, rather than reversed (postfix)
+Polish notation as used by most other concatenative languages. While unsual at first,
+this results in a remarkable formal similarity between Bracket and lisp code.
 
 Bracket does not aim to compete for a productive programming language. On purpose the language is lean. It has
-neither the performance, nor does it support the many types, libraries, and ecosystem of a mature programming language (e.g. clojure, common lisp, or factor, postscript). In contrast, Bracket excels in its
+neither the performance, nor does it support the many types, libraries, and the ecosystem of a mature programming language (e.g. Clojure, Common Lisp, or Factor, Postscript). In contrast, Bracket excels in its
 design space: genetic programming. It allows expressive prgramming with a
-minimal syntax and is optimized for the iterative performant calculation of a huge number of small
+minimal syntax and is optimized for the performant iteration of a huge number of runs of rather small
 programs. 
 In addition, Bracket can be regarded as an experiment how far we can go by combining a concatenative language
 with prefix Poish notation and lexical scoping.
@@ -39,11 +39,11 @@ with prefix Poish notation and lexical scoping.
 
 #### Quotations, bras and kets
 Bracket is a stack-based language. Similar to Forth,
-data, functions, and code are hold in a stack (also called _quotation_ as in concatenative languages, and _list_ as in lisp).
-A quotation can hold numbers, symbols, and other quotations. For example `[1 2 dup [2 +]]`.
+data, functions, and code are hold instacks (also called _quotations_ as in concatenative languages, and _lists_ as in lisp).
+A quotation can hold any other literals (numbers, symbols) and other quotations. For example `[1 2 dup [2 +]]`.
 
 In Bracket two stacks play a special role:
- - the _bra_, which holds the program code
+ - the _bra_, which holds the current program code
  - the _ket_, a global stack which holds function arguments and the results of the computation
 
 Making abuse of [Dirac's bra-ket notation from quantum mechanics](https://en.wikipedia.org/wiki/Bra%E2%80%93ket_notation),
@@ -54,41 +54,44 @@ brackets (e.g., `[baz]`).
 
 Apart from the ket, all other quotations (including the bra) use prefix (normal) Polish notation, where
 the top of the stack is placed at the right position and the bottom of the stack on the left.
-Only the ket is written in prefix (polish) Polish notation (similar to Forth), where the top of the stack is on the left and the bottom at the right.
+Only the ket is written in postfix (reversed) Polish notation (similar to Forth), where the top of the stack is on the left and the bottom at the right.
 For example, the stack `[1 2 [3 4] 5]` with topmost element 5 is written in bra-form as `<1 2 [3 4] 5|` and in 
-ket-form is transposed to postfix notation `|5 [3 4] 2  1>` (note that the small quotation `[3 4]` inside the ket uses prefix again).
+ket-form is transposed to postfix notation `|5 [3 4] 2  1>`. Note that the small quotation `[3 4]` inside the ket uses prefix notation again.
 
 A Bracket program essentially consists of a bra and a ket (as well as an environment) and 
 is written as  `<bra|ket>`. 
-In loose analogy to Dirac's notation in quantum-mechanics, bra and ket can be regarded as vectors,
+In loose analogy to Dirac's notation in quantum-mechanics, bras and kets can be regarded as vectors,
 where 
 the ket corresponds to a vector of arguments, while the bra takes the role of a vector that acts as an operator. The result of the computation then is achieved by _applying_ the bra on the ket (aka scalar product in quantum mechanics) ` <bra|ket>`.
 
 
 
 ### Evaluation
-During an evaluation, successively single elements are taken from the top of the bra. If the element is not a symbol it is pushed on top of the ket. If the element is a symbol it is interpreted as an operator that takes arguments from the top of the ket, evaluates them, and returns a modified bra and ket. The program terminates, when the bra is empty. The ket then holds the result of the computation.
-Thus, computation in Bracket follows the usual logistic of a
+During an evaluation, successively single elements are taken from the top of the bra. If the element is not a symbol it is pushed on top of the ket. If the element is a symbol it is interpreted as an operator that takes arguments from the top of the ket (possibly also from the bra), evaluates them, and pushes the result on the ket (thereby possibly also modifying the bra).
+The program terminates, when the bra is empty. The ket then holds the result of the computation.
+Thus, computation in Bracket follows the usual program flow of a
 [concatenative language](https://en.wikipedia.org/wiki/Concatenative_programming_language).
 In particular, concatenation of quotations corresponds to the composition of functions.
 
-Bracket supports nested environments.
+Bracket supports variable bindings and nested environments.
 An environments is a linked list of frames, and every frame is a linked list of bindings.  
 When evaluating a symbol on the top of the bra (or with the builtin `eval` entering a new scope) the current bra is stored on the stack, a new environment is created, and the associated quotation is evaluated in this environment, and finally the old bra is restored from the stack.
 
-### Examples (further examples can be found in the test directory)
+### Code examples (further examples can be found in the test directory)
 
 - Numbers and quotation are sequentialy shifted from the bra to the ket. Since the ket is printed in reverse notation 
 the order of elements visually does not change
   - `<1 2 | >  `  first evaluates to `<1| 2>`
  and then to `<| 1 2>`
-  - `<1 2 3 ; this is a comment |>  `  evaluates to `|1 2 3>`
   - `<1 [2 3]| `  evaluates to `|1 [2 3]>`
+
+  - single line comments separated by `;`
+  - `<1 2 3 ; this is a comment |>  `  evaluates to `|1 2 3>`
 
 - esc:
   Symbols can be escaped from evaluation
   with the escape operator `esc` (or the short notation `'`) 
-  and thereby asrejust shifted from the bra to the ket without evaluation 
+  and thereby are just shifted from the bra to the ket without evaluation 
   - `<foo esc|`  evaluates to `|foo>`
   - `<foo'|`  evaluates to `|foo>`
 
@@ -98,7 +101,8 @@ the order of elements visually does not change
   - `<drop 1 2|`  evaluates to `|2>`
 
 - Stack operators
-  - `<car  [1 2 3]|`   evaluates to `|3 [1 2]>`
+  - `<car  [1 2 3]|`   evaluates to `|3 [1 2]>` ; (car of
+  a quotation leaves the reminder on the ket)
   - `<cdr [1 2 3]|`   evaluates to `|[1 2]>`
   - `<cons 3 [1 2]|`   evaluates to `|[1 2 3]>`
   - `<cons car [1 2 3]|`   evaluates to `|[1 2 3]>`
@@ -121,16 +125,16 @@ the order of elements visually does not change
   - `<if foo' bar' 1|`  evaluates to `|foo>` 
   - `<if foo' bar' 0|`  evaluates to `|bar>` 
 
-- `rec` anonymous recursion (supports tail recursion)
-  - `<eval [rec gt 0 dup add 1] -5|` evaluates to `|0>` 
-    at the begin of any evaluation the bra is saved, 
+- `rec` anonymous recursion (supports tail recursion)  
+    At the begin of any evaluation the bra is saved, 
     rec takes an argument from the ket, if the argument is true
     the bra is replaced by the saved bra, i.e., a simple recursion
-    (this example codes a simple loop from -5 to 0) 
+  - `<eval [rec gt 0 dup + 1 dup] -5|` evaluates to `|0 -1 -2 -3 -4 -5>` 
+    (a simple loop from -5 to 0) 
 
 - `def` defines a new variable in current scope
 
-  - `<def x' 3|`  evaluates to `|>`, but the symbol is bound to the number 3 in the current environment (note that x needs to be escaped) 
+  - `<def x' 3|`  evaluates to empty ket`|>`, but the symbol is bound to the number 3 in the current environment (note that x needs to be escaped) 
   - `<x def x' 3|`  evaluates to `|3>` (evaluating a symbol that is bound to a number pushes the number on the ket) 
   - `<+ x 3 def x' 2| `  evaluates to `|5>`  (first, the number 2 is pushed on the ket, then x is bound to 2, then 3 and the binding of x are pushed on the stack, finally the + operator adds the two elements on the ket)
   - `<foo def foo' [add 1] 2|` evaluates to `|3>`
@@ -147,8 +151,9 @@ the order of elements visually does not change
 - `lambda`, closures and lexical scoping
   - `<lambda x' [+ x 1]|`  evaluates to `|[+ x 1 def x']>`  
   Thereby the following has happened:
-    - a lexical closure is created that contains the quotation and the current enviroment. By printing the closure on the ket only the associated quotation is shown, so from inspection of the ket one cannot distinguish a closure from a pure quotation.
-    - to handle the argumets of the lambda, the expression `def x'` is pushed on the quotation. Thus, formally we can regard this as a lambda expression, a function that takes the argument x.
+    - a lexical closure, that contains the quotation and the current enviroment, is created and pushed on the ket. By printing the closure on the ket only the associated quotation is shown, so from inspection of the ket one cannot distinguish a closure from a pure quotation.
+    - to handle the argumets of the lambda, the expression `def x'` is pushed on the quotation. Thus, when the closure is evaluated, at first the top value on the ket is bound to the symbol x. In this sense, 
+    formally, we can regard this as a lambda expression, a function that takes the argument x.
   - `<\x' [+ x 1]|`  evaluates to `|[+ x 1 def x']>`  (short notation for lambda)
   - `<eval \x' [+ x 1] 4|`  evaluates to `|5>`
   - `<f 4 def f' \x' [+ x 1]|`  evaluates to `|5>`

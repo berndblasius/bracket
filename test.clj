@@ -54,13 +54,24 @@
 ;	dup  0= IF  1+  recurse EXIT  THEN
 ;	1- over 1+ swap recurse recurse ;
 
-ack 3 4 def ack' \[m n]
+ack 3 10 def ack' \[m n]
     [cond
       [ [ack - m 1 ack m - n 1]
         [ack - m 1 1]  [eq 0 n]
         [+ n 1]  [eq 0 m]
       ]
     ]
+
+;ack 3 11 def ack' \[m n]
+;    [eval if
+;        [+ n 1]  
+;        [ eval if 
+;           [ack - m 1 1]  
+;           [ack - m 1 ack m - n 1]
+;           eq 0 n
+;        ]
+;        eq 0 m
+;    ]
 
 ;(defn ack [m n]
 ;  (cond (zero? m) (inc n)
