@@ -11,7 +11,7 @@ but uses a normal (prefix) Polish notation
 
 - a marriage of a concatenative language with Lisp, that is, it includes dynamically and lexically scoped variables, lambdas and closures
 
-- here implemented in julia (other implementation exist in Go and C)
+- here implemented in Go (other implementation exist in Julia and C)
 
 - still a work in progress...
 
