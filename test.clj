@@ -1,5 +1,8 @@
 ; some test programs
 
+dip [+ 1] 5 2 trace 1
+
+
 ; ****************************************************************
 ; Ackermann function
 ; def ack(m: BigInt, n: BigInt): BigInt = {
@@ -19,6 +22,7 @@
 ;  (cond (zero? m) (inc n)
 ;        (zero? n) (ack (dec m) 1)
 ;        :else (ack (dec m) (ack m (dec n)))))
+
 
 ; Haskell
 ; ack 0 n = n + 1
@@ -54,14 +58,33 @@
 ;	dup  0= IF  1+  recurse EXIT  THEN
 ;	1- over 1+ swap recurse recurse ;
 
-ack 3 10 def ack' \[m n]
-    [cond
-      [ [ack - m 1 ack m - n 1]
-        [ack - m 1 1]  [eq 0 n]
-        [+ n 1]  [eq 0 m]
-      ]
-    ]
 
+;ack 3 10 def ack' \[m n]
+;    [cond
+;      [ [ack - m 1 ack m - n 1]
+;        [ack - m 1 1]  [eq 0 n]
+;        [+ n 1]  [eq 0 m]
+;      ]
+;    ]
+
+; *******************
+;ack 3 10 def ack' \[m n]
+;    [eval if eq 0 m
+;        [+ n 1]  
+;    [eval if eq 0 n
+;        [ack - m 1 1]  
+;    [ack - m 1 ack m - n 1] ]]
+
+; Benchmark
+; ack 3 4 --> 0.028 sec
+; ack 3 5 --> 0.045 sec
+; ack 3 6 --> 0.1 sec
+; ack 3 7 --> 0.3 sec
+; ack 3 8 --> 1.14 sec
+; ack 3 9 --> 3.2 sec
+; ack 3 10 --> 12.1 sec
+; *******************
+    
 ;ack 3 11 def ack' \[m n]
 ;    [eval if
 ;        [+ n 1]  

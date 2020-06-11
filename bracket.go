@@ -7,6 +7,7 @@ import (
     //"errors"
     "fmt"
     "math/rand"
+    "os"
 )
 
 const cells = 24*1024*1024
@@ -93,6 +94,7 @@ const (  // bracket primitives
         dup
         drop
         swap
+        rot
         cons
         car
         cdr
@@ -100,9 +102,7 @@ const (  // bracket primitives
         dip
         rec
         def
-        set
         lambda
-        whl
         add
         sub
         mul
@@ -112,30 +112,40 @@ const (  // bracket primitives
         rnd
         eq
         iff   // "iff" since "if" already taken by golang
-        cond
         esc
         vesc
         val
         trace
+        typ
         print
         unbound
 )
+        //rto
+        //tor
+        //cond
+        //set
+        //whl
 
 var primStr = map[value] string {
     cons:"cons", car:"car", cdr:"cdr", def:"def", dip:"dip", dup:"dup", drop:"drop", 
-    esc:"esc", eval:"eval", eq:"eq", iff:"if", cond:"cond", lambda:"\\",
-    rec:"rec", set:"set", swap:"swap", val:"val", vesc:"vesc", whl:"whl",
-    add:"+", sub:"-", mul:"*", div:"/", gt:">", lt:"<",rnd:"rnd",trace:"trace",
-    print:"print",
+    esc:"esc", eval:"eval", eq:"eq", iff:"if",  lambda:"\\",
+    rec:"rec", swap:"swap", val:"val", vesc:"vesc", 
+    add:"+", sub:"-", mul:"*", div:"/", gt:">", lt:"<",rnd:"rnd",
+    rot:"rot", trace:"trace", typ:"typ", print:"print",
 }
+//cond:"cond",set:"set",dip:"dip",whl:"whl",
+//rto:"toR", tor:"Rto", 
 
 var str2prim = map[string] value {
     "cons":cons, "car":car, "cdr":cdr, "def":def, "dip":dip, "dup":dup, "drop":drop, 
-    "esc":esc, "eval":eval, "eq":eq, "if":iff, "cond":cond, "\\":lambda, "lambda":lambda,
-    "rec":rec, "set":set, "swap":swap, "val":val, "vesc":vesc, "whl":whl,
+    "esc":esc, "eval":eval, "eq":eq, "if":iff, "\\":lambda, "lambda":lambda,
+    "rec":rec,  "swap":swap, "val":val, "vesc":vesc, 
     "add":add, "+":add, "sub":sub, "-":sub, "*":mul, "mul":mul, "/":div, "div":div,
-    "gt":gt, ">":gt, "lt":lt, "<":lt, "rnd":rnd,"trace":trace,"print":print,
+    "gt":gt, ">":gt, "lt":lt, "<":lt, "rnd":rnd,
+    "rot":rot,"trace":trace,"typ":typ,"print":print,
 }
+//"cond":cond,"set":set,"dip":dip,"whl":whl,
+//"toR":tor, "Rto":rto,
 
 type stats struct { // some statistics about the running program
     nInst   int   // number of Instructions
@@ -148,18 +158,16 @@ type stats struct { // some statistics about the running program
 type Vm struct {
     bra  value    // program, future of computation
     ket  value    // global data stack, past of computation
-    aux  value    // auxilliary stack (helps with stack shuffling)
     env  value    // environment
-    root value    // anchor to save stuff for gc
     next int      // index to next entry on arena
     arena []cell  // memory arena to hold the cells
     brena []cell  // second arena, needed for copying gc
     stack []value  //
     stackIndex int
-    needGc bool  // flag to indicate that heap space gets rare
+    needGc bool   // flag to indicate that heap space gets rare
     depth int     // current recursion depth
     stats stats   // some statistics about the running program
-    trace int   //trace mode e: 0=no trace, 1=trace non-verbose, 3=verbose
+    trace int     //trace mode e: 0=no trace, 1=trace non-verbose, 3=verbose
 
 }
 
@@ -168,7 +176,7 @@ func init_vm() Vm {
     b := make([]cell, cells)
     stack := make([]value, stackSize)
     stats := stats{0,0,0,0}
-    vm := Vm{nill,nill,nill,nill,nill,-1,a,b,stack,-1,false,0,stats,0}
+    vm := Vm{nill,nill,nill,-1,a,b,stack,-1,false,0,stats,0}
     vm.env = vm.cons(nill,nill)
     return vm 
 }
@@ -178,9 +186,7 @@ func (vm *Vm) reset() {
     vm.stats = stats{0,0,0,0}
     vm.bra = nill
     vm.ket = nill
-    vm.aux = nill
     vm.env = vm.cons(nill,nill)
-    vm.root = nill
     vm.stackIndex = -1
     vm.depth = 0
     vm.trace = 0
@@ -223,8 +229,6 @@ func (vm *Vm) gc() {
    // scan root of every live object
    vm.bra = vm.relocate(vm.bra)
    vm.ket = vm.relocate(vm.ket)
-   vm.root = vm.relocate(vm.root)
-   vm.aux = vm.relocate(vm.aux)
    vm.env = vm.relocate(vm.env)
    for i:=0; i<=vm.stackIndex; i++ { 
      vm.stack[i] = vm.relocate(vm.stack[i])
@@ -240,14 +244,14 @@ func (vm *Vm) gc() {
       finger += 1
   }
 
-   fmt.Println("GC: live objects found: ", vm.next-1)
-   fmt.Println("stack ", vm.stackIndex, " ", vm.depth)
+   //fmt.Println("GC: live objects found: ", vm.next-1)
+   //fmt.Println("stack ", vm.stackIndex, " ", vm.depth)
    if vm.next >= gcMargin {
        fmt.Println("Bracket GC, arena too small")
         panic("Vm stack overflow")
    }
    vm.needGc = false
-   fmt.Println("GC finished")
+   //fmt.Println("GC finished")
 }
 
 // **********************
@@ -361,11 +365,12 @@ func (vm *Vm) lengthNonQuoted(list value) int {
    n := 0
    for isCell(list) {
        elem := vm.car(list)
-       if elem == esc {    // a quoted element
-          if isDef(vm.cdr(list)) {  
-             list = vm.cdr(list)
-          }
-       } else if (elem != vesc && elem != lambda) {  // no quoted element
+       //if elem == esc {    // a quoted element
+       //   if isDef(vm.cdr(list)) {  
+       //      list = vm.cdr(list)
+       //   }
+       //} else 
+       if (elem != vesc && elem != lambda) {  // no quoted element
           n += 1
        }
        list = vm.cdr(list)
@@ -386,7 +391,14 @@ func (vm *Vm) reverse(list value) (value, bool) {
     var p value 
     l := nill
     for vm.popCons(&list,&p) { // take care not to pop from a closure
-       l = vm.cons(p,l)
+        l = vm.cons(p,l)
+        if vm.needGc {
+            vm.pushStack(l)
+            vm.pushStack(list)
+            vm.gc()
+            list = vm.popStack()
+            l = vm.popStack()
+        }
     }
     if isClosure(list) { //take only quotation from closure, not the env
        l = vm.cons(vm.car(list), l)
@@ -560,6 +572,16 @@ func (vm *Vm) fSwap() {
    }
 }
 
+func (vm *Vm) fRot() {
+   var a,b,c value 
+   if vm.pop2(&vm.ket, &a, &b) && vm.pop(&vm.ket,&c){
+       vm.ket = vm.cons(b,vm.ket)
+       vm.ket = vm.cons(a,vm.ket)
+       vm.ket = vm.cons(c,vm.ket)
+   }
+}
+
+
 func (vm *Vm) fCons() {
     var p1,p2 value
     if vm.pop2(&vm.ket, &p1, &p2) {
@@ -574,7 +596,7 @@ func (vm *Vm) fCar() {
     if vm.pop(&vm.ket, &p) {
         vm.stripClosure(&p)
         if vm.pop(&p, &head) { // car a list
-            vm.ket = vm.cons(p,vm.ket) // leave the rest of the list on the ket 
+            //vm.ket = vm.cons(p,vm.ket) // leave the rest of the list on the ket 
             vm.ket = vm.cons(head,vm.ket)
         } else {    // car a symbol
           val := vm.boundvalue(p)   // lookup symbol.. 
@@ -631,9 +653,9 @@ func myLt(x,y int) int {
    }
 }
 
+// a bit spagetti, but doing the job
 func (vm *Vm) fMath(op mathIntFunc) {
-    // STILL NEED TO CHECK FOR CLOSURES AND LISTS!!
-    var n1,n2 value
+    var c1, c2, n1, n2 value
     if vm.pop2(&vm.ket, &n1, &n2) {
       if isSymb(n1) {
           n1 = vm.boundvalue(n1) 
@@ -641,12 +663,77 @@ func (vm *Vm) fMath(op mathIntFunc) {
       if isSymb(n2) {
           n2 = vm.boundvalue(n2) 
       }
-      // Here we should check that n1 and n2 are numbers now !!!!
-      n3 := boxInt(op(unbox(n1), unbox(n2)))
-      vm.ket = vm.cons(n3,vm.ket)
+      if isNumb(n1) && isNumb(n2) {
+          vm.ket = vm.cons(boxInt(op(unbox(n1), unbox(n2))),vm.ket)
+      } else if isCell(n1) && isCell(n2) {
+          vm.stripClosure(&n1)
+          vm.stripClosure(&n2)
+          c := nill
+          for vm.pop(&n1,&c1) && vm.pop(&n2,&c2) {
+             if isSymb(c1) {
+                    c1 = vm.boundvalue(c1) 
+             }
+             if isSymb(c2) {
+                    c2 = vm.boundvalue(c2) 
+             }
+             if isNumb(c1) && isNumb(c2) {
+                 c = vm.cons(boxInt(op(unbox(c1), unbox(c2))) ,c)
+             }
+             if vm.needGc {
+                  vm.pushStack(c)
+                  vm.pushStack(n1)
+                  vm.pushStack(n2)
+                  vm.gc()
+                  n2 = vm.popStack()
+                  n1 = vm.popStack()
+                  c = vm.popStack()
+             }
+          }
+          c,_ = vm.reverse(c)
+          vm.ket = vm.cons(c,vm.ket)
+      } else if isCell(n1) {
+          vm.stripClosure(&n1)
+          c := nill
+          for vm.pop(&n1,&c1) {
+             if isSymb(c1) {
+                    c1 = vm.boundvalue(c1) 
+             }
+             if isNumb(c1) && isNumb(n2) {
+                 c = vm.cons(boxInt(op(unbox(c1), unbox(n2))) ,c)
+             }
+              if vm.needGc {
+                  vm.pushStack(c)
+                  vm.pushStack(n1)
+                  vm.gc()
+                  n1 = vm.popStack()
+                  c = vm.popStack()
+              }
+          }
+          c,_ = vm.reverse(c)
+          vm.ket = vm.cons(c,vm.ket)
+      } else if isCell(n2) {
+          vm.stripClosure(&n2)
+          c := nill
+          for vm.pop(&n2,&c2) {
+             if isSymb(c2) {
+                    c2 = vm.boundvalue(c2) 
+             }
+             if isNumb(n1) && isNumb(c2) {
+                 c = vm.cons(boxInt(op(unbox(n1), unbox(c2))) ,c)
+             }
+              if vm.needGc {
+                  vm.pushStack(c)
+                  vm.pushStack(n2)
+                  vm.gc()
+                  n2 = vm.popStack()
+                  c = vm.popStack()
+              }
+          }
+          c,_ = vm.reverse(c)
+          vm.ket = vm.cons(c,vm.ket)
+      }
   }
 }
-
 func (vm *Vm) fRnd() {
     var p value
     if vm.pop(&vm.ket, &p) {
@@ -681,7 +768,8 @@ func (vm *Vm) fEq() {
 
 func (vm *Vm) fIf() {
    var p, p1, p2 value
-   if vm.pop2(&vm.ket, &p1, &p2) && vm.pop(&vm.ket,&p) {
+   //if vm.pop2(&vm.ket, &p1, &p2) && vm.pop(&vm.ket,&p) {
+   if vm.pop(&vm.ket,&p)&& vm.pop2(&vm.ket, &p1, &p2) {
        if istrue(p) {
           vm.ket = vm.cons(p1, vm.ket)
       } else {
@@ -693,60 +781,11 @@ func (vm *Vm) fIf() {
 func (vm *Vm) fDip() {
    var q1,q2 value
    if vm.pop2(&vm.ket,&q1, &q2) {
-        vm.pushStack(q2) 
-        vm.doEval(q1)
-        q2 = vm.popStack()
-        vm.ket = vm.cons(q2, vm.ket)
+        vm.bra = vm.cons(q2, vm.bra) 
+        vm.bra = vm.cons(eval, vm.bra)
+        vm.ket = vm.cons(q1, vm.ket)
    }
 }
-
-func (vm *Vm) fCond() {
-   var b, p, p1, p2 value
-   if vm.pop(&vm.ket, &p) {
-      if isAtom(p) {
-          p = vm.boundvalue(p)
-      }
-      for vm.pop(&p, &p1) {
-         //if vm.pop(&p,&p2) { 
-         if isCell(p) { 
-            vm.pushStack(p) 
-            vm.doEval(p1)
-            p = vm.popStack()
-            vm.pop(&p,&p2)  // delay the pop to protect p2 from gc
-            if vm.pop(&vm.ket, &b) && istrue(b) {
-                vm.doEval(p2)
-                return
-            }
-         } else {
-            vm.doEval(p1)
-            return
-        }
-      }
-   }
-}
-
-func (vm *Vm) fWhl() {
-   fmt.Println("Start whl ")
-   var q,b value
-   if vm.pop2(&vm.ket,&q, &b) {
-      //vm->root = cons(vm->bra,vm->root,vm);
-      //vm->root = cons(q,vm->root,vm);
-       vm.root = vm.cons(vm.bra,vm.root)
-       vm.root = vm.cons(q,vm.root)
-       for istrue(b) {
-         vm.bra = vm.car(vm.root)
-         vm.evalBra()
-         if !vm.pop(&vm.ket,&b){
-             break
-         }
-       }
-       vm.root = vm.cdr(vm.root)
-       vm.bra = vm.car(vm.root)
-       vm.root = vm.cdr(vm.root)
-   }
-}
-
-
 
 func (vm *Vm) fEsc() {
     var val value
@@ -780,6 +819,28 @@ func (vm *Vm) fTrace() { // change trace mode
     var p value
     if vm.pop(&vm.ket,&p) {
         vm.trace = unbox(p)
+    }
+}
+
+func (vm *Vm) fTyp() { // type of an element
+    var p value
+    var t int
+    if vm.pop(&vm.ket,&p) {
+        switch {
+        case isInt(p):
+            t=1
+        case isPrim(p):
+            t=2
+        case isSymb(p):
+            t=3
+        case isCons(p):
+            t=4
+        case isClosure(p):
+            t=5
+        default:
+            t=0
+        }
+        vm.ket = vm.cons(boxInt(t),vm.ket)
     }
 }
 
@@ -929,6 +990,7 @@ func (vm *Vm) fDef() {
 }
 
 
+/* we remove set (replaced by backtick)
 func (vm *Vm) fSet() {
    var key, val value
    if vm.pop2(&vm.ket, &key, &val) {
@@ -939,35 +1001,7 @@ func (vm *Vm) fSet() {
        //vm.printList(vm.car(vm.env)); fmt.Println()
    }
 }
-
-func (vm *Vm) doEval(op value) {
-    if isNil(op) {
-        return
-    } else if isSymb(op) {
-        op = vm.boundvalue(op)
-    }
-    if isNumb(op) || isSymb(op) {
-        vm.ket = vm.cons(op,vm.ket)
-        return
-    } 
-    vm.depth++
-    vm.pushStack(vm.env)
-    vm.pushStack(vm.bra)
-    if isCons(op) {
-        vm.bra = op
-        vm.env = vm.newEnv(vm.env)
-    } else if isClosure(op) {
-       vm.bra = vm.car(op)
-       vm.env = vm.cdr(op)
-    } else {
-       vm.bra = vm.cons(op,nill)
-       vm.env = vm.newEnv(vm.env)
-    }
-    vm.evalBra()
-    vm.depth--
-    vm.bra = vm.popStack()
-    vm.env = vm.popStack()
-}
+*/
 
 func (vm *Vm) fEval() {
     var op value
@@ -1041,6 +1075,8 @@ func (vm *Vm) evalPrim(p value) {
         vm.fDrop()
     case swap:
         vm.fSwap()
+    case rot:
+        vm.fRot()
     case cons:
         vm.fCons()
     case car:
@@ -1055,12 +1091,12 @@ func (vm *Vm) evalPrim(p value) {
         vm.fRec()
     case def:
         vm.fDef()
-    case set:
-        vm.fSet()
+    //case set:
+    //    vm.fSet()
     case lambda:
         vm.fLambda()
-    case whl:
-        vm.fWhl()
+    //case whl:
+    //    vm.fWhl()
     case add:
         vm.fMath(myAdd)
     case sub:
@@ -1079,8 +1115,8 @@ func (vm *Vm) evalPrim(p value) {
         vm.fEq()
     case iff:
         vm.fIf()
-    case cond:
-        vm.fCond()
+    //case cond:
+    //    vm.fCond()
     case esc:
         vm.fEsc()
     case vesc:
@@ -1089,10 +1125,13 @@ func (vm *Vm) evalPrim(p value) {
         vm.fVal()
     case trace:
         vm.fTrace()
+    case typ:
+        vm.fTyp()
     case print:
         vm.fPrint()
     default:
         fmt.Println("Error: unknown primitive")
+        vm.printElem(p); fmt.Println()
         
     }
 }
@@ -1146,11 +1185,13 @@ func main() {
     fmt.Printf("rock'n roll\n")   
     vm := init_vm()
     
-    //prog := "add 1 2"
+    // load prelude
+    vm.bra = vm.loadFile("prelude.clj")
+    vm.evalBra()
+
+
     //prog := "whl [gt 0 dup add 1] 1 -50000000"  // 5e7, 3 sec on Mac
-    //prog := "foo bar foo def foo' 2 def bar' 3"
  
-    //prog := "eval foo' 1 2 def foo' [add] trace 1"   
     
     //prog := "eval [ rec gt 0 dup add 1 ] -5 trace 1"
     //prog := "eval [rec gt 0 dup add 1 dup] -5 trace 0"
@@ -1158,51 +1199,12 @@ func main() {
     //prog := "eval [ rec gt 0 dup add 1 ] -50000000"   // 5e7, 3.9 sec on MAc
     //prog := "eval [ rec gt 0 dup add 1 ] -500000000"   // 5e8, 24.9 sec on MAc
     
-    //prog := "eval eval [ lambda [x def x' + 1 x`] def x' 10] def x' 1 trace 1"
-    //prog := "foo foo foo def foo' eval [ lambda [x def x' + 1 x`] def x' 10] def x' 1 trace 1"
-    //prog := "x` foo def x' 10 def foo' [lambda [x`] def x' 1] x` def x' 2"
-
-
-    //prog := `a 2 a 3 def a' [make_adder 4]
-    //a 2 a 3 def a' [make_adder 5]
-    //def make_adder' lambda [addx def x']
-    //def addx' [+ x z def z']`    //, "6 7 7 8")
-
-    //prog := `a5 2 a5 3 def a5' [make_adder 5]
-    //def make_adder' [ eval [+ x z def z'] def x' ]`    //, "6 7 7 8")
-
-    //prog := "g def g' [f def x' 20] def f' lambda [x] def x' 10"
-    //prog := "11 eval [5 f def x' 20] def f' lambda [x] def x' 10 trace 1"
-
-    //prog := "f def f' lambda x' [+ x 1] 10 trace 1"
-    //prog := "a b def [a b] 1 [2 3]"
-    //prog := "a` b` def [a b] 1 [2 3]"
-    //prog := "x eval [x def [x`] 2] x def x' 3 trace 1"
-    //prog := "x x def [x`] 2 x def x' 3 trace 0"
-    //prog := "x x def [x`] 2 trace 1"
-    //prog := "a` b` def [[a b]] [1 2 3]"
-
-    //prog := "eq g`  f` def g' \\ [x] [1 2 'A] def f' \\ [x] [1 2 'A] def foo' 2"
-    //test("cond [[2]]",       "2")                 
-    //prog := "cond [[10 ] [11 ] [0]] trace 1"
-    //test("cond [[10 drop] [11 drop] [1]]",   "11")
-    //test("cond [[3] [1 drop] [eq 4] [2 drop] [lt 4 dup]] 3", "3")                 
-    //test("cond [[3] [1 drop] [eq 4] [2 drop] [lt 4 dup]] 5", "2")                 
-    //prog := "cond foo' 5 def foo' [[3] [1 drop] [eq 4] [2 drop] [lt 4 dup]]"
-
-    //prog := "cond [[2]] trace` 0"                
-    //prog := "100 cond [[10 drop] [11 drop] [1]] trace 1"
-
-     //prog := "eval eval [\\[] [x def [x`] + 1 x`]] def x' 10" //"12 11")
-     //prog := "foo foo def foo' eval [\\[] [x set x' + 1 x`]] def x' 10" //"12 11")
-
-
-    prog := "ack 3 10 def ack' \\[m n]"+
+    /*prog := "ack 3 10 def ack' \\[m n]"+
     "[cond "+
     "  [ [ack - m 1 ack m - n 1]"+
     "    [ack - m 1 1]  [eq 0 n]"+
     "    [+ n 1]  [eq 0 m]] ]"
-
+*/
 
    /* prog := "ack 3 8 def ack' "+
     "[cond "+
@@ -1212,32 +1214,44 @@ func main() {
 
 */
 
-    vm.bra = vm.makeBra(prog)
-    //vm.bra = vm.loadFile("test.clj")
-   
+    //prog := "drop2 1 2 3"
+    //prog := "if 0 20"
+
+    //prog := "fac 4 def fac' [eval if rot [1 drop] [* fac - swap 1 dup] eq 1 dup]"
+    //prog := "+ [2 1 7] [4 8]"
+    //prog := "rot 1"
+    prog := "rot 1"
+
+    if len(os.Args) == 2 {
+        vm.bra = vm.loadFile(os.Args[1])
+    } else {
+       vm.bra = vm.makeBra(prog)
+    }
+
     vm.printBra(vm.bra)
-    //vm.printList(vm.bra) 
-    //vm.printList(vm.reverse(vm.bra))
     
     vm.evalBra()
     //fmt.Println(vm.bra)
 
-    //vm.gc()
 
     vm.printKet(vm.ket)
-    
-    //e :=  vm.env
-    //e1 := vm.car(e)
-    //e2 := vm.cdr(e1)
-    //vm.printKet(e)
 
 }
 
 
 /* todos
-   - problem with GC of Ackermann function !!!
 
-   defining the symbol ket, creates a new local ket in 
-   the current environment (could be useful in combination 
-with closures)
+ - defining the symbol ket, creates a new local ket in 
+    the current environment (could be useful in combination 
+    with closures)
+
+ - dot operator to access symbol bindings in closure
+ 
+ - reverse if (to emulate cond)
+   and direct evaluate (so we avoid ubiquitous eval if)
+  
+- "if"+
+   "gt"  is parsed wrong
 */
+
+// go build  -gcflags=-B
