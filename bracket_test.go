@@ -213,7 +213,8 @@ func TestBracket(t *testing.T) {
   test("a 2 a 3 def a' [make_adder 4] a 2 a 3 def a' [make_adder 5]"+
        "def make_adder' [addx def x']"+
        "def addx' [+ x z def z']" , "6 7 7 8")
-
+       
+  test("add1 10 add1 20 def add1' eval \\[x] [\\[][+ x]] 1", "11 21") 
 
   // math and logic 
   test("add 2 3", "5")
@@ -390,6 +391,14 @@ func TestBracket(t *testing.T) {
   test("eval [ rec gt 0 dup add 1 dup] -5", "0 -1 -2 -3 -4 -5")   //simple loop
   test("foo def foo' [rec gt 0 dup add 1 dup] -5", "0 -1 -2 -3 -4 -5")   //simple loop
 
+  // simple closure
+
+  test("eval f 3 2 "+  // use closure without assigning to variable
+       "a 5 a 6 "+
+       "def a' f 1 "+    // assing closure to variable
+       "def f' \\[x][ "+  // return a closure
+       "\\[y][+ x y]]","5 6 7")
+
   
   // simple closure for bank account
   test("acc withdraw' 60 "+
@@ -400,13 +409,31 @@ func TestBracket(t *testing.T) {
            "[withdraw] "+ 
         "[eval if eq m deposit' "+
            "[deposit] "+
-          " [unknown']]] "+
+          " [unknown']]] "+  
    "def withdraw' [ "+
        "eval if gt balance rot "+ 
          "[balance def [balance`] - balance] "+
          "[insuff' drop] dup ] "+ 
    "def deposit' [balance def [balance`] + balance]"+
    "def balance' ]", "70 130 insuff 30 90")
+
+   // more fun with closures
+   test(
+    "show-bal "+
+    "eval deposit1 acc' 3 "+    // make a deposit to acc
+    "def deposit1' \\[ac] "+    // a setter function dependent on closure
+    "  [\\[def [bal`] + bal] ac`] "+
+
+    "show-bal deposit 5 "+      // make the deposit and show balance   
+    "def deposit' \\[def [bal`] + bal] acc' "+  // setter function
+    "show-bal "+                     // show the balance
+    "def show-bal' \\[bal] acc' "+  // a getter function 
+    "acc "+                     // run the closure (put's do-stuff on ket
+    "def acc' make-acc 10 "+    // create the account and store in acc
+    "def make-acc' [ "+         // a function for making the account
+    "   \\[][do-stuff'] "+      // a closure is returned
+    "   def bal' "+             // create the local variable 
+    "]", "18 15 10 do-stuff")
 
 
   // Factorial

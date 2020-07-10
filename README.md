@@ -228,13 +228,15 @@ Note that during the evaluation the bra was changed, a new environment was creat
   - Tail recursion  
   `eval` and `rec` support tail recursion. That is, if the last operation during an evaluation is another evaluation, no new environment is created.
 
-- `lambda`, closures and lexical scoping
+- `lambda`, closures and lexical scoping  
+A closure is a pair of any literal (usualy a quotation) and an environment. Closures are created with the lambda operator.
   - `<lambda x' [+ x 1]|`  evaluates to `|[+ x 1 def x']>`  
   Thereby the following has happened:
     - a lexical closure, that contains the quotation and the current enviroment, is created and pushed on the ket. By printing the closure on the ket only the associated quotation is shown, so from inspection of the ket one cannot distinguish a closure from a pure quotation.
     - to handle the argumets of the lambda, the expression `def x'` is pushed on the quotation. Thus, when the closure is evaluated, at first the top value on the ket is bound to the symbol x. In this sense, 
     formally, we can regard this as a lambda expression, a function that takes the argument x.
-  - short notation for lambda   
+    - the evaluation of a closure takes place in the environment stored in the closure
+  - `\`, a short notation for lambda   
    `<\x' [+ x 1]|`  evaluates to `|[+ x 1 def x']>`  
   - usually the arguments are passed as a list  
    `<\[x] [+ x 1]|`  evaluates to `|[+ x 1 def x']>`   
@@ -243,6 +245,21 @@ Note that during the evaluation the bra was changed, a new environment was creat
   `<f 4 def f' \[x] [+ x 1]|`  evaluates to `|5>`
   - lambdas can take multiple arguments  
    `<f 4 3 def f' \[x y] [- x y]|`  evaluates to `|1>` 
+
+ 
+ - Closure of internal variables  
+ If a function returns a closure, also the closure's environment is returned and outlives the evaluation of the function. In this way the closure can store variable bindings  
+   - `def add1' eval \[x] [\[][+ x]] 1`   
+   creates a closure that internally stores the vlaue of x; applying add1 to a number adds 1 to it
+
+  - Lambda acting on an existing closure  
+  Usually the second argument of lambda is a quotation. If instead the second argument is already a closure, lambda operates a bit differently. Then, a new closure is generated as a pair, combining the the first argument of lambda and the environment of the closure.
+  This allows to pass around the environment of a closure and thus, makes it possible to emulate 'poor man' object orientation and name-spaces.
+
+    - `\[+ x] clos` where clos is a closure, generates a new closure in which [+ x] is the quotation and the environment is the environment of `clos.` In this sense, the closure can be regarded as a name-space and any quotation can be evaluated in the environment of the closure.
+    - ``eval \ [def x` 3] clos``   
+    Here, the lambda defines a setter function for the local variable `x` in the environment of `clos`. By using `eval` the variable `x` is redefined to 3. In this sense, the closure can be regarded as a class, in which `x` is an object, and in which getter and setter functions can be defined with the lambda. 
+
 
 
 
@@ -290,7 +307,7 @@ Here some useful examples:
 - `def sum'  [reduce [add] 0]`
 - `def size' [reduce [add 1 drop] 0]`
 
-### Code Examples
+### Code Examples (remember the reversed order: read code from bottom to top)
 - Factorial
    - tail recursive
     ```clojure
@@ -322,7 +339,14 @@ Here some useful examples:
      [ack - m 1 ack m - n 1]]]
   ```
 
-
+- Simple closure
+```clojure
+eval f 3 2   ; use closure without assigning to variable
+a 5 a 6      ; evaluates to |6 7>
+def a' f 1     ; assing closure to variable
+def f' \\[x][  ; return a closure
+   \[y][+ x y]]
+ ```
 
 - simple closure for bank account
   ```clojure
@@ -342,6 +366,26 @@ Here some useful examples:
       def balance' ]
   ```
 
+- more fun with closures: bank accout again
+  ```clojure
+  show-bal              ;evaluates to 18
+  eval deposit1 acc' 3  ;eval setter function for acc
+  ;a setter function for a general closure
+  def deposit1' \[ac] [\[def [bal`] + bal] ac`] 
+
+  show-bal              ;evaluates to 15
+  deposit 5             ;make the deposit
+  ;a setter function 
+  def deposit' \[def [bal`] + bal] acc' 
+  show-bal                  ;evaluates to 10
+  def show-bal' \[bal] acc' ;a getter function
+  acc                       ;run the closure 
+  def acc' make-acc 10      ;actually make the closure
+  def make-acc' [
+      \[] [do-stuff']       ;generate the closure
+      def bal'              ;generate local variable
+  ]
+  ```
 
 ### Remarks on prefix notation
 - Note that due to prefix notation functions must be defined in the source code **below** their usage!

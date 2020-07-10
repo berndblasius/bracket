@@ -863,27 +863,32 @@ func (vm *Vm) fRec() {
 }
 
 func (vm *Vm) fLambda() {
-   var quote,keys value
+   var clos,quote,keys value
    if vm.pop2(&vm.ket, &keys, &quote) {
        if isAtom(quote) {
           quote = vm.boundvalue(quote)
        }
-       if isAtom(quote) { // we need a quotation to do lambda
+       switch {
+       case isCons(quote):   // make a new closure
+          if isDef(keys) {                 // if arguments are not nill ..
+               quote = vm.cons(def, quote)  // .. push a definition on quote
+               quote = vm.cons(keys, quote)
+               if isAtom(keys) {
+                   quote = vm.cons(esc, quote)
+               }
+          }
+          env  := vm.newEnv(vm.env)
+          clos = vm.closure(quote,env)
+       case isClosure(quote): // new close wth keys as quotation
+          env  := vm.cdr(quote)
+          clos = vm.closure(keys,env)
+       default:  // we need a quotation to do lambda
            return
-       } 
-       if isDef(keys) {                 // if arguments are not nill ..
-           quote = vm.cons(def, quote)  // .. push a definition on quote
-           quote = vm.cons(keys, quote)
-           if isAtom(keys) {
-               quote = vm.cons(esc, quote)
-           }
        }
-       if isCons(quote) { // make a closure (only of not yet)
-          env := vm.newEnv(vm.env)
-          vm.ket = vm.cons(vm.closure(quote,env), vm.ket)
-       }
+       vm.ket = vm.cons(clos, vm.ket)  // push the new closure on the ket
    }
 }
+
 
 /*
 func (vm *Vm) pushN(list value, n int) (value, int) {
@@ -1233,7 +1238,6 @@ func main() {
     vm.evalBra()
     //fmt.Println(vm.bra)
 
-
     vm.printKet(vm.ket)
 
 }
@@ -1245,7 +1249,7 @@ func main() {
     the current environment (could be useful in combination 
     with closures)
 
- - dot operator to access symbol bindings in closure
+ - should closures be printed in round brackets or in bra-form?
  
  - reverse if (to emulate cond)
    and direct evaluate (so we avoid ubiquitous eval if)

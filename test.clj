@@ -1,6 +1,6 @@
 ; some test programs
 
-dip [+ 1] 5 2 trace 1
+;dip [+ 1] 5 2 trace 1
 
 
 ; ****************************************************************
@@ -281,6 +281,34 @@ dip [+ 1] 5 2 trace 1
 
 ;; TRANSLATE SICP
 ; ****************************
+add1 10 add1 20 def add1' eval \[x] [\[][+ x]] 1
+
+; test of closure
+;eval f 3 2  ; use closure without assigning to variable
+;a 5 a 6
+;def a' f 1 ; assing closure to variable
+;def f' \[x][
+;   \[y][+ x y]]
+
+; more fun with closures, getters and setters
+
+;show-bal
+;eval deposit1 acc' 3
+;def deposit1' \[ac] [\[def [bal`] + bal] ac`]
+;show-bal
+;deposit 5
+;def deposit' \[def [bal`] + bal] acc'
+;show-bal
+;show-bal
+;def show-bal' \[bal] acc'
+;acc
+;def acc' make-acc 10
+;def make-acc' [
+;   \[] [do-stuff']
+;   def bal'
+;]
+
+
 
 ;acc withdraw' 60
 ;acc deposit' 100
